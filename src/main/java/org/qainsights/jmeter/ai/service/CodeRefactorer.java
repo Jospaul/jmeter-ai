@@ -97,10 +97,10 @@ public class CodeRefactorer {
             if ("openai".equalsIgnoreCase(aiServiceType)) {
                 model = AiConfig.getProperty("openai.default.model", "gpt-4o");
             } else {
-                model = AiConfig.getProperty("anthropic.model", "claude-3-sonnet-20240229");
+                model = AiConfig.getProperty("bedrock.default.model", "anthropic.claude-3-sonnet-20240229-v1:0");
             }
 
-            String refactoredCode = aiService.generateResponse(List.of(prompt), model);
+            String refactoredCode = aiService.generateResponse(java.util.Collections.singletonList(prompt), model);
 
             // Clean up any remaining markdown or code block markers
             refactoredCode = cleanUpCodeResponse(refactoredCode);

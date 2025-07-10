@@ -1,28 +1,40 @@
 package org.qainsights.jmeter.ai.service;
 
 import java.util.List;
+import java.util.ArrayList;
 
-import com.anthropic.client.AnthropicClient;
-import com.anthropic.client.okhttp.AnthropicOkHttpClient;
-import com.anthropic.models.messages.Message;
-import com.anthropic.models.messages.MessageCreateParams;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
+import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelRequest;
+import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelResponse;
+import software.amazon.awssdk.services.bedrock.BedrockClient;
+import software.amazon.awssdk.core.SdkBytes;
+
 import org.qainsights.jmeter.ai.utils.AiConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.qainsights.jmeter.ai.usage.AnthropicUsage;
+import org.qainsights.jmeter.ai.usage.BedrockUsage;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 
 /**
- * ClaudeService class.
+ * BedrockClaudeService class for AWS Bedrock Claude integration.
  */
-public class ClaudeService implements AiService {
-    private static final Logger log = LoggerFactory.getLogger(ClaudeService.class);
+public class BedrockClaudeService implements AiService {
+    private static final Logger log = LoggerFactory.getLogger(BedrockClaudeService.class);
     private final int maxHistorySize;
     private String currentModelId;
     private float temperature;
-    private final AnthropicClient client;
+    private final BedrockRuntimeClient runtimeClient;
+    private final BedrockClient client;
     private String systemPrompt;
     private boolean systemPromptInitialized = false;
     private long maxTokens;
+    private final ObjectMapper objectMapper;
 
     // Default system prompt to focus responses on JMeter
     private static final String DEFAULT_JMETER_SYSTEM_PROMPT = "You are a JMeter expert assistant embedded in a JMeter plugin called 'Feather Wand - JMeter Agent'. "
@@ -102,27 +114,32 @@ public class ClaudeService implements AiService {
             "\n" +
             "Version: JMeter 5.6+ (Also support questions about older versions from 3.0+)";
 
-    public ClaudeService() {
+    public BedrockClaudeService() {
         // Default history size of 10, can be configured through jmeter.properties
         this.maxHistorySize = Integer.parseInt(AiConfig.getProperty("claude.max.history.size", "10"));
+        this.objectMapper = new ObjectMapper();
 
-        // Initialize the client
-        String API_KEY = AiConfig.getProperty("anthropic.api.key", "YOUR_API_KEY");
+        // Initialize the Bedrock client
+        String region = AiConfig.getProperty("aws.bedrock.region", "us-east-1");
 
         // Check if logging should be enabled
-        String loggingLevel = AiConfig.getProperty("anthropic.log.level", "");
+        String loggingLevel = AiConfig.getProperty("bedrock.log.level", "");
         if (!loggingLevel.isEmpty()) {
-            // Set the environment variable for the Anthropic client logging
-            System.setProperty("ANTHROPIC_LOG", loggingLevel);
-            log.info("Enabled Anthropic client logging with level: {}", loggingLevel);
+            log.info("Enabled Bedrock client logging with level: {}", loggingLevel);
         }
 
-        this.client = AnthropicOkHttpClient.builder()
-                .apiKey(API_KEY)
+        this.runtimeClient = BedrockRuntimeClient.builder()
+                .region(Region.of(region))
+                .credentialsProvider(DefaultCredentialsProvider.create())
+                .build();
+        
+        this.client = BedrockClient.builder()
+                .region(Region.of(region))
+                .credentialsProvider(DefaultCredentialsProvider.create())
                 .build();
 
-        // Get default model from properties or use SONNET if not specified
-        this.currentModelId = AiConfig.getProperty("claude.default.model", "claude-3-sonnet-20240229");
+        // Get default model from properties
+        this.currentModelId = AiConfig.getProperty("claude.default.model", "anthropic.claude-3-sonnet-20240229-v1:0");
         this.temperature = Float.parseFloat(AiConfig.getProperty("claude.temperature", "0.5"));
         this.maxTokens = Long.parseLong(AiConfig.getProperty("claude.max.tokens", "1024"));
 
@@ -136,8 +153,6 @@ public class ClaudeService implements AiService {
             }
 
             log.info("Loaded system prompt from properties (length: {})", systemPrompt.length());
-            // Only log the first 100 characters of the system prompt to avoid flooding the
-            // logs
             log.info("System prompt (first 100 chars): {}",
                     systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
         } catch (Exception e) {
@@ -146,8 +161,12 @@ public class ClaudeService implements AiService {
         }
     }
 
-    public AnthropicClient getClient() {
+    public BedrockClient getClient() {
         return client;
+    }
+    
+    public BedrockRuntimeClient getRuntimeClient() {
+        return runtimeClient;
     }
 
     public void setModel(String modelId) {
@@ -192,7 +211,7 @@ public class ClaudeService implements AiService {
     }
 
     public String sendMessage(String message) {
-        log.info("Sending message to Claude: {}", message);
+        log.info("Sending message to Claude via Bedrock: {}", message);
         return generateResponse(java.util.Collections.singletonList(message));
     }
 
@@ -202,7 +221,7 @@ public class ClaudeService implements AiService {
 
             // Ensure a model is set
             if (currentModelId == null || currentModelId.isEmpty()) {
-                currentModelId = "claude-3-sonnet-20240229";
+                currentModelId = "anthropic.claude-3-sonnet-20240229-v1:0";
                 log.warn("No model was set, defaulting to: {}", currentModelId);
             }
 
@@ -212,86 +231,77 @@ public class ClaudeService implements AiService {
                 log.warn("Invalid temperature value ({}), defaulting to: {}", temperature, 0.7f);
             }
 
-            // Log which model is being used for this conversation
             log.info("Generating response using model: {} and temperature: {}", currentModelId, temperature);
 
-            // Check if this is the first message in a conversation based on
-            // systemPromptInitialized flag
+            // Check if this is the first message in a conversation
             boolean isFirstMessage = !systemPromptInitialized;
             if (isFirstMessage) {
                 log.info("Using system prompt (first 100 chars): {}",
                         systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
                 systemPromptInitialized = true;
-            } else {
-                log.info("Using previously initialized conversation with system prompt");
             }
 
-            // Limit conversation history to last 10 messages to avoid token limits
+            // Limit conversation history
             List<String> limitedConversation = conversation;
             if (conversation.size() > maxHistorySize) {
                 limitedConversation = conversation.subList(conversation.size() - maxHistorySize, conversation.size());
                 log.info("Limiting conversation to last {} messages", limitedConversation.size());
             }
 
-            // Build the request parameters
-            MessageCreateParams.Builder paramsBuilder = MessageCreateParams.builder()
-                    .maxTokens(maxTokens)
-                    .temperature(temperature)
-                    .model(currentModelId);
-
-            // Only include the system prompt for the first message in a conversation
+            // Build the request payload for Claude via Bedrock
+            ObjectNode requestBody = objectMapper.createObjectNode();
+            requestBody.put("max_tokens", maxTokens);
+            requestBody.put("temperature", temperature);
+            
+            // Add system prompt if this is the first message
             if (isFirstMessage) {
-                paramsBuilder.system(systemPrompt);
-                log.info("Including system prompt in request (length: {})", systemPrompt.length());
-            } else {
-                log.info("Skipping system prompt to save tokens (already sent in previous messages)");
+                requestBody.put("system", systemPrompt);
             }
 
-            // Add messages from the conversation history
+            // Build messages array
+            ArrayNode messages = objectMapper.createArrayNode();
             for (int i = 0; i < limitedConversation.size(); i++) {
                 String msg = limitedConversation.get(i);
+                ObjectNode messageNode = objectMapper.createObjectNode();
                 if (i % 2 == 0) {
                     // User messages
-                    paramsBuilder.addUserMessage(msg);
+                    messageNode.put("role", "user");
                 } else {
-                    // Assistant (Claude) messages
-                    paramsBuilder.addAssistantMessage(msg);
+                    // Assistant messages
+                    messageNode.put("role", "assistant");
                 }
+                messageNode.put("content", msg);
+                messages.add(messageNode);
             }
+            requestBody.set("messages", messages);
 
-            MessageCreateParams params = paramsBuilder.build();
-            log.info("Request parameters: maxTokens={}, temperature={}, model={}, messagesCount={}",
-                    params.maxTokens(), params.temperature(), params.model(),
-                    limitedConversation.size());
+            String requestBodyJson = objectMapper.writeValueAsString(requestBody);
+            log.info("Request body: {}", requestBodyJson);
 
-            Message message = client.messages().create(params);
+            // Invoke the model
+            InvokeModelRequest request = InvokeModelRequest.builder()
+                    .modelId(currentModelId)
+                    .body(SdkBytes.fromUtf8String(requestBodyJson))
+                    .build();
 
-            log.info(message.content().toString());
+            InvokeModelResponse response = runtimeClient.invokeModel(request);
+            String responseBody = response.body().asUtf8String();
+            log.info("Response body: {}", responseBody);
 
-            // Estimate token usage (Anthropic doesn't provide exact usage in the response)
-            // We can estimate based on characters - this is a rough estimate
-            long estimatedPromptTokens = 0;
-            for (String msg : limitedConversation) {
-                estimatedPromptTokens += estimateTokens(msg);
-            }
+            // Parse the response
+            JsonNode responseJson = objectMapper.readTree(responseBody);
+            String responseText = responseJson.get("content").get(0).get("text").asText();
 
-            if (isFirstMessage && systemPrompt != null && !systemPrompt.isEmpty()) {
-                estimatedPromptTokens += estimateTokens(systemPrompt);
-            }
-
-            // Estimate response tokens
-            String responseText = String.valueOf(message.content().get(0).text().get().text());
-            long estimatedCompletionTokens = estimateTokens(responseText);
-
-            // Record the estimated usage
+            // Record usage
             try {
-                AnthropicUsage.getInstance().recordUsage(
-                        message,
+                long inputTokens = responseJson.has("usage") ? responseJson.get("usage").get("input_tokens").asLong() : estimateTokens(String.join(" ", limitedConversation));
+                long outputTokens = responseJson.has("usage") ? responseJson.get("usage").get("output_tokens").asLong() : estimateTokens(responseText);
+                
+                BedrockUsage.getInstance().recordUsage(
                         currentModelId,
-                        estimatedPromptTokens,
-                        estimatedCompletionTokens);
-                log.info("Recorded estimated token usage: {} input, {} output",
-                        estimatedPromptTokens, estimatedCompletionTokens);
+                        inputTokens,
+                        outputTokens);
+                log.info("Recorded token usage: {} input, {} output", inputTokens, outputTokens);
             } catch (Exception e) {
                 log.error("Failed to record token usage", e);
             }
@@ -299,8 +309,6 @@ public class ClaudeService implements AiService {
             return responseText;
         } catch (Exception e) {
             log.error("Error generating response", e);
-
-            // Extract and format error message for better readability
             String errorMessage = extractUserFriendlyErrorMessage(e);
             return "Error: " + errorMessage;
         }
@@ -308,102 +316,62 @@ public class ClaudeService implements AiService {
 
     /**
      * Estimates the number of tokens for a given text.
-     * This is a rough estimate as Anthropic doesn't provide exact token counts in
-     * the API response.
-     * Uses a heuristic of characters/4 which works reasonably well in practice.
-     * 
-     * @param text The text to estimate tokens for
-     * @return Estimated token count
      */
     private long estimateTokens(String text) {
         if (text == null || text.isEmpty()) {
             return 0;
         }
-        // Rough estimation: average token is ~4 characters
-        // This is a simplification but works reasonably well in practice
         return Math.max(1, text.length() / 4);
     }
 
     /**
      * Extracts a user-friendly error message from an exception
-     * 
-     * @param e The exception to extract the error message from
-     * @return A user-friendly error message
      */
     private String extractUserFriendlyErrorMessage(Exception e) {
         String errorMessage = e.getMessage();
 
-        // Check for credit balance error
-        if (errorMessage != null && errorMessage.contains("credit balance is too low")) {
-            return "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.";
+        // Check for common AWS Bedrock errors
+        if (errorMessage != null && errorMessage.contains("AccessDeniedException")) {
+            return "Access denied. Please check your AWS credentials and permissions for Bedrock.";
         }
 
-        // Check for API key error
-        if (errorMessage != null && errorMessage.contains("invalid_api_key")) {
-            return "Invalid API key. Please check your API key and try again.";
-        }
-
-        // Check for rate limit error
-        if (errorMessage != null && errorMessage.contains("rate_limit_exceeded")) {
+        if (errorMessage != null && errorMessage.contains("ThrottlingException")) {
             return "Rate limit exceeded. Please try again later.";
         }
 
-        // Check for model not found error
-        if (errorMessage != null && errorMessage.contains("model_not_found")) {
-            return "The selected model was not found. Please select a different model.";
+        if (errorMessage != null && errorMessage.contains("ValidationException")) {
+            return "Invalid request. Please check your model configuration.";
         }
 
-        // Check for context length error
-        if (errorMessage != null && errorMessage.contains("context_length_exceeded")) {
-            return "The conversation is too long. Please start a new conversation.";
+        if (errorMessage != null && errorMessage.contains("ModelNotReadyException")) {
+            return "The selected model is not ready. Please try again later or select a different model.";
         }
 
         // For other errors, provide a cleaner message
         if (errorMessage != null) {
-            // Extract the actual error message from the AnthropicError format
-            if (errorMessage.contains("AnthropicError")) {
-                // Try to extract the message field from the error JSON
-                int messageStart = errorMessage.indexOf("message=");
-                if (messageStart != -1) {
-                    int messageEnd = errorMessage.indexOf("}", messageStart);
-                    if (messageEnd != -1) {
-                        return errorMessage.substring(messageStart + 8, messageEnd);
-                    }
-                }
-            }
+            return errorMessage;
         }
 
-        // If we couldn't extract a specific error message, return a generic one
-        return "An error occurred while communicating with the Anthropic API. Please try again later.";
+        return "An error occurred while communicating with AWS Bedrock. Please try again later.";
     }
 
     /**
      * Generates a response from the AI using the specified model.
-     * 
-     * @param conversation The conversation history
-     * @param model        The specific model to use for this request
-     * @return The AI's response
      */
     public String generateResponse(List<String> conversation, String model) {
         log.info("Generating response with specified model: {}", model);
 
-        // Store current model
         String originalModel = this.currentModelId;
-
         try {
-            // Set the specified model
             this.currentModelId = model;
-
-            // Generate the response using the specified model
             return generateResponse(conversation);
         } finally {
-            // Restore the original model
             this.currentModelId = originalModel;
             log.info("Restored original model: {}", originalModel);
         }
     }
 
     public String getName() {
-        return "Anthropic Claude";
+        return "AWS Bedrock Claude";
     }
 }

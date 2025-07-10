@@ -1,6 +1,9 @@
 package org.qainsights.jmeter.ai.intellisense;
 
 import javax.swing.JTextArea;
+import javax.swing.text.Position;
+import javax.swing.plaf.TextUI;
+
 import java.awt.Point;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
@@ -107,7 +110,7 @@ public class InputBoxIntellisense {
             if (!suggestions.isEmpty()) {
                 Point pt;
                 try {
-                    Rectangle2D rect = textArea.modelToView2D(atIdx);
+                    Rectangle2D rect = textArea.modelToView(atIdx);
                     pt = new Point((int)rect.getX(), (int)(rect.getY() + rect.getHeight()));
                 } catch (Exception ex) {
                     pt = new Point(0, textArea.getHeight());

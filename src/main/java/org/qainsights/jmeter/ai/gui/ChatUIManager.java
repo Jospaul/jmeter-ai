@@ -16,8 +16,8 @@ import org.qainsights.jmeter.ai.service.ClaudeService;
 import org.qainsights.jmeter.ai.service.OpenAiService;
 import org.qainsights.jmeter.ai.utils.Models;
 import org.qainsights.jmeter.ai.utils.VersionUtils;
-import com.anthropic.models.ModelInfo;
-import com.anthropic.models.ModelListPage;
+import com.anthropic.models.models.ModelInfo;
+import com.anthropic.models.models.ModelListPage;
 
 /**
  * Manages the UI components of the chat interface.

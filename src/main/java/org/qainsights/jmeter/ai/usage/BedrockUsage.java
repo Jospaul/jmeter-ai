@@ -1,9 +1,6 @@
 package org.qainsights.jmeter.ai.usage;
 
-import com.anthropic.client.AnthropicClient;
-import com.anthropic.client.okhttp.AnthropicOkHttpClient;
-import com.anthropic.models.messages.Message;
-import com.anthropic.models.models.ModelInfo;
+import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.qainsights.jmeter.ai.utils.AiConfig;
@@ -14,69 +11,54 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * Class to track and provide Anthropic token usage information.
+ * Class to track and provide AWS Bedrock token usage information.
  */
-public class AnthropicUsage {
-    private static final Logger log = LoggerFactory.getLogger(AnthropicUsage.class);
+public class BedrockUsage {
+    private static final Logger log = LoggerFactory.getLogger(BedrockUsage.class);
 
     // Singleton instance
-    private static final AnthropicUsage INSTANCE = new AnthropicUsage();
+    private static final BedrockUsage INSTANCE = new BedrockUsage();
 
-    // Anthropic client for API calls
-    private AnthropicClient client;
+    // Bedrock client for API calls
+    private BedrockRuntimeClient client;
 
     // Store usage history
     private final List<UsageRecord> usageHistory = new ArrayList<>();
 
     // Private constructor for singleton
-    private AnthropicUsage() {
+    private BedrockUsage() {
         initializeClient();
     }
 
     /**
-     * Initialize the Anthropic client
+     * Initialize the Bedrock client
      */
     private void initializeClient() {
         try {
-            String apiKey = AiConfig.getProperty("anthropic.api.key", "");
-            if (apiKey.isEmpty()) {
-                log.warn("Anthropic API key is empty. Token usage information may not be accurate.");
-            }
-
-            // Initialize the client using the correct builder pattern
-            client = AnthropicOkHttpClient.builder()
-                    .apiKey(apiKey)
-                    .build();
-
-            log.info("Anthropic client initialized for usage tracking");
+            String region = AiConfig.getProperty("aws.bedrock.region", "us-east-1");
+            log.info("Bedrock client initialized for usage tracking in region: {}", region);
         } catch (Exception e) {
-            log.error("Failed to initialize Anthropic client for usage tracking", e);
+            log.error("Failed to initialize Bedrock client for usage tracking", e);
         }
     }
 
     /**
-     * Get the singleton instance of AnthropicUsage.
+     * Get the singleton instance of BedrockUsage.
      *
      * @return The singleton instance
      */
-    public static AnthropicUsage getInstance() {
+    public static BedrockUsage getInstance() {
         return INSTANCE;
     }
 
     /**
-     * Record usage from a Message response.
+     * Record usage from a Bedrock response.
      *
-     * @param message          The Message response from Anthropic
      * @param model            The model used for the completion
      * @param promptTokens     The number of prompt tokens (input)
      * @param completionTokens The number of completion tokens (output)
      */
-    public void recordUsage(Message message, String model, long promptTokens, long completionTokens) {
-        if (message == null) {
-            log.warn("Unable to record usage - message is null");
-            return;
-        }
-
+    public void recordUsage(String model, long promptTokens, long completionTokens) {
         try {
             long totalTokens = promptTokens + completionTokens;
 
@@ -96,13 +78,13 @@ public class AnthropicUsage {
     }
 
     /**
-     * Set the Anthropic client for usage tracking
+     * Set the Bedrock client for usage tracking
      * 
-     * @param client The Anthropic client to use
+     * @param client The Bedrock client to use
      */
-    public void setClient(AnthropicClient client) {
+    public void setClient(BedrockRuntimeClient client) {
         this.client = client;
-        log.info("Anthropic client set for usage tracking");
+        log.info("Bedrock client set for usage tracking");
     }
 
     /**
@@ -112,11 +94,11 @@ public class AnthropicUsage {
      */
     public String getUsageSummary() {
         if (usageHistory.isEmpty()) {
-            return "No Anthropic usage data available. Try using the Claude service first.";
+            return "No AWS Bedrock usage data available. Try using the Claude service first.";
         }
 
         StringBuilder summary = new StringBuilder();
-        summary.append("# Anthropic Usage Summary\n\n");
+        summary.append("# AWS Bedrock Usage Summary\n\n");
 
         // Summary totals
         long totalPromptTokens = 0;
@@ -139,11 +121,11 @@ public class AnthropicUsage {
 
         // Add pricing note
         summary.append("## Pricing Information\n");
-        summary.append("For up-to-date pricing information, please visit Anthropic's official pricing page:\n");
-        summary.append("https://www.anthropic.com/pricing\n\n");
-        summary.append("Anthropic pricing varies by model and may change over time.\n\n");
+        summary.append("For up-to-date pricing information, please visit AWS Bedrock's official pricing page:\n");
+        summary.append("https://aws.amazon.com/bedrock/pricing/\n\n");
+        summary.append("AWS Bedrock pricing varies by model and may change over time.\n\n");
 
-        // Add detail for the last 10 conversations using a more readable format
+        // Add detail for the last 10 conversations
         summary.append("## Recent Conversations\n");
 
         SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");

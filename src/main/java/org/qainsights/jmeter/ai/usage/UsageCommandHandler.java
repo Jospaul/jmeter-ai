@@ -2,6 +2,7 @@ package org.qainsights.jmeter.ai.usage;
 
 import org.qainsights.jmeter.ai.service.AiService;
 import org.qainsights.jmeter.ai.service.OpenAiService;
+import org.qainsights.jmeter.ai.service.BedrockClaudeService;
 import org.qainsights.jmeter.ai.service.ClaudeService;
 import org.slf4j.LoggerFactory;
 import org.slf4j.Logger;
@@ -38,7 +39,23 @@ public class UsageCommandHandler {
 
             // Return the usage summary
             return OpenAiUsage.getInstance().getUsageSummary();
-        } else if (serviceToUse instanceof ClaudeService) {
+        } else if (serviceToUse instanceof BedrockClaudeService) {
+            log.info("Processing Bedrock usage request");
+
+            // Get the Bedrock client from the service and set it in the BedrockUsage
+            // instance
+            BedrockClaudeService bedrockClaudeService = (BedrockClaudeService) serviceToUse;
+            try {
+                // Set the Bedrock client in the BedrockUsage instance
+                BedrockUsage.getInstance().setClient(bedrockClaudeService.getRuntimeClient());
+                log.info("Set Bedrock client in BedrockUsage from BedrockClaudeService");
+            } catch (Exception e) {
+                log.error("Failed to set Bedrock client in BedrockUsage", e);
+            }
+
+            // Return the usage summary
+            return BedrockUsage.getInstance().getUsageSummary();
+        }else if (serviceToUse instanceof ClaudeService) {
             log.info("Processing Anthropic usage request");
 
             // Get the Anthropic client from the service and set it in the AnthropicUsage

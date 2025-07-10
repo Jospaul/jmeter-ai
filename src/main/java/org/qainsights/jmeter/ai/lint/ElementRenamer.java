@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.lang.String;
 
 /**
  * A utility class for renaming JMeter test plan elements using AI suggestions.
@@ -346,7 +347,7 @@ public class ElementRenamer {
         lastRenameOperation.clear();
         
         // Parse the AI response to extract suggested names
-        List<String> suggestionLines = suggestions.lines()
+        List<String> suggestionLines = java.util.Arrays.stream(suggestions.split("\n"))
                 .filter(line -> line.startsWith("Element ") && line.contains(":"))
                 .collect(Collectors.toList());
         

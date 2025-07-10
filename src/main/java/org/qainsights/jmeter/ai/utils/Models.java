@@ -1,13 +1,20 @@
 package org.qainsights.jmeter.ai.utils;
 
-import com.anthropic.client.AnthropicClient;
-import com.anthropic.client.okhttp.AnthropicOkHttpClient;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.bedrock.BedrockClient;
+import software.amazon.awssdk.services.bedrock.model.FoundationModelSummary;
+import software.amazon.awssdk.services.bedrock.model.ListFoundationModelsRequest;
+import software.amazon.awssdk.services.bedrock.model.ListFoundationModelsResponse;
 
-import com.anthropic.models.ModelInfo;
-import com.anthropic.models.ModelListPage;
-import com.anthropic.models.ModelListParams;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.anthropic.client.AnthropicClient;
+import com.anthropic.client.okhttp.AnthropicOkHttpClient;
+import com.anthropic.models.models.ModelInfo;
+import com.anthropic.models.models.ModelListPage;
+import com.anthropic.models.models.ModelListParams;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.models.Model;
@@ -20,28 +27,34 @@ public class Models {
     private static final Logger log = LoggerFactory.getLogger(Models.class);
 
     /**
-     * Get a combined list of model IDs from both Anthropic and OpenAI
+     * Get a combined list of model IDs from both Bedrock, Anthropic and OpenAI
+     * @param bedrockClient Bedrock client
      * @param anthropicClient Anthropic client
      * @param openAiClient OpenAI client
      * @return List of model IDs
      */
-    public static List<String> getModelIds(AnthropicClient anthropicClient, OpenAIClient openAiClient) {
+    public static List<String> getModelIds(BedrockClient bedrockClient, AnthropicClient anthropicClient, OpenAIClient openAiClient) {
         List<String> modelIds = new ArrayList<>();
         
         try {
+            // Get Bedrock models
+            List<String> bedrockModels = getBedrockModelIds(bedrockClient);
+            if (bedrockModels != null) {
+                modelIds.addAll(bedrockModels);
+            }
+            
             // Get Anthropic models
             List<String> anthropicModels = getAnthropicModelIds(anthropicClient);
             if (anthropicModels != null) {
                 modelIds.addAll(anthropicModels);
             }
-            
             // Get OpenAI models
             List<String> openAiModels = getOpenAiModelIds(openAiClient);
             if (openAiModels != null) {
                 modelIds.addAll(openAiModels);
             }
             
-            log.info("Combined {} models from Anthropic and OpenAI", modelIds.size());
+            log.info("Combined {} models from Bedrock and OpenAI", modelIds.size());
             return modelIds;
         } catch (Exception e) {
             log.error("Error combining models: {}", e.getMessage(), e);
@@ -49,6 +62,53 @@ public class Models {
         }
     }
     
+    /**
+     * Get Bedrock models as ListFoundationModelsResponse
+     * @param client Bedrock client
+     * @return ListFoundationModelsResponse containing Bedrock models
+     */
+    public static ListFoundationModelsResponse getBedrockModels(BedrockClient client) {
+        try {
+            log.info("Fetching available models from AWS Bedrock");
+            String region = AiConfig.getProperty("aws.bedrock.region", "us-east-1");
+            
+            client = BedrockClient.builder()
+                    .region(Region.of(region))
+                    .credentialsProvider(DefaultCredentialsProvider.create())
+                    .build();
+
+            ListFoundationModelsRequest request = ListFoundationModelsRequest.builder()
+                    .byProvider("anthropic")
+                    .build();
+            ListFoundationModelsResponse models = client.listFoundationModels(request);
+            
+            log.info("Successfully retrieved {} models from AWS Bedrock", models.modelSummaries().size());
+            for (FoundationModelSummary model : models.modelSummaries()) {
+                log.debug("Available Bedrock model: {}", model.modelId());
+            }
+            return models;
+        } catch (Exception e) {
+            log.error("Error fetching models from AWS Bedrock: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+    
+    /**
+     * Get Bedrock model IDs as a List of Strings
+     * @param client Bedrock client
+     * @return List of model IDs
+     */
+    public static List<String> getBedrockModelIds(BedrockClient client) {
+        ListFoundationModelsResponse models = getBedrockModels(client);
+        if (models != null && models.modelSummaries() != null) {
+            return models.modelSummaries().stream()
+                    .filter(model -> model.modelId().contains("claude"))
+                    .map(FoundationModelSummary::modelId)
+                    .collect(Collectors.toList());
+        }
+        return new ArrayList<>();
+    }
+
     /**
      * Get Anthropic models as ModelListPage
      * @param client Anthropic client

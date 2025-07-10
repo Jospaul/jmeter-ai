@@ -9,7 +9,7 @@ This plugin provides a simple way to chat with AI in JMeter. Feather Wand serves
 
 ## ✨ Features
 
-- Chat with AI directly within JMeter using either Claude or OpenAI models
+- Chat with AI directly within JMeter using either AWS Bedrock Claude or OpenAI models
 - Get suggestions for JMeter elements based on your needs
 - Ask questions about JMeter functionality and best practices
 - Command intellisense with auto-completion for special commands in the chat input box
@@ -21,7 +21,7 @@ This plugin provides a simple way to chat with AI in JMeter. Feather Wand serves
 - Use `@wrap` command to intelligently group HTTP samplers under Transaction Controllers for better organization and reporting
 - Use right click context menu to refactor code, format code, and add functions in JSR223 script editor
 - Customize AI behavior through configuration properties
-- Switch between Claude and OpenAI models based on your preference or specific needs
+- Switch between AWS Bedrock Claude and OpenAI models based on your preference or specific needs
 
 ## 📥 Installation
 
@@ -48,17 +48,19 @@ The Feather Wand plugin can be configured through JMeter properties. Copy the `j
 
 ### 🔧 Available Configuration Options
 
-#### Anthropic (Claude) Configuration
+#### AWS Bedrock (Claude) Configuration
 
-| Property                  | Description                                                  | Default Value              |
-| ------------------------- | ------------------------------------------------------------ | -------------------------- |
-| `anthropic.api.key`       | Your Claude API key                                          | Required                   |
-| `claude.default.model`    | Default Claude model to use                                  | claude-3-sonnet-20240229   |
-| `claude.temperature`      | Temperature setting (0.0-1.0)                                | 0.7                        |
-| `claude.max.tokens`       | Maximum tokens for AI responses                              | 1024                       |
-| `claude.max.history.size` | Maximum conversation history size                            | 10                         |
-| `claude.system.prompt`    | System prompt that guides Claude's responses                 | See sample properties file |
-| `anthropic.log.level`     | Logging level for Anthropic API requests ("info" or "debug") | Empty (disabled)           |
+| Property                  | Description                                                  | Default Value                                |
+| ------------------------- | ------------------------------------------------------------ | -------------------------------------------- |
+| `aws.bedrock.region`      | AWS region where Bedrock is available                        | us-east-1                                    |
+| `aws.access.key.id`      | AWS Access Key ID (optional if using IAM roles)             | Optional                                     |
+| `aws.secret.access.key`  | AWS Secret Access Key (optional if using IAM roles)         | Optional                                     |
+| `claude.default.model`    | Default Claude model to use via Bedrock                     | anthropic.claude-3-sonnet-20240229-v1:0     |
+| `claude.temperature`      | Temperature setting (0.0-1.0)                                | 0.7                                          |
+| `claude.max.tokens`       | Maximum tokens for AI responses                              | 1024                                         |
+| `claude.max.history.size` | Maximum conversation history size                            | 10                                           |
+| `claude.system.prompt`    | System prompt that guides Claude's responses                 | See sample properties file                   |
+| `bedrock.log.level`       | Logging level for Bedrock API requests ("info" or "debug")   | Empty (disabled)                             |
 
 #### OpenAI Configuration
 
@@ -77,7 +79,7 @@ The Feather Wand plugin can be configured through JMeter properties. Copy the `j
 | Property                  | Description                                                  | Default Value              |
 | ------------------------- | ------------------------------------------------------------ | -------------------------- |
 | `jmeter.ai.refactoring.enabled` | Enable code refactoring for JSR223 script editor            | true                       |
-| `jmeter.ai.service.type` | The AI service to use for code refactoring ("openai" or "anthropic") | "openai"                   |
+| `jmeter.ai.service.type` | The AI service to use for code refactoring ("openai" or "bedrock") | "openai"                   |
 
 ### 💬 Customizing the System Prompt
 
@@ -214,15 +216,19 @@ This feature is especially useful for imported or recorded test plans that conta
 
 ## 🗝️ API Configuration
 
-Feather Wand supports both Anthropic (Claude) and OpenAI APIs. You can configure either or both in your properties file.
+Feather Wand supports both AWS Bedrock (Claude) and OpenAI APIs. You can configure either or both in your properties file.
 
-### Anthropic API (Claude)
+### AWS Bedrock (Claude)
 
-1. Go to [Anthropic API](https://www.anthropic.com/) website
-2. Sign up for an account
-3. Create a new API key
-4. Copy the API key and paste it into the `anthropic.api.key` property in your `jmeter.properties` file
-5. For more information about the API key, visit the [API Key documentation](https://www.anthropic.com/api)
+1. Set up AWS credentials using one of the following methods:
+   - AWS credentials file (`~/.aws/credentials`)
+   - Environment variables (`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`)
+   - IAM roles (recommended for EC2 instances)
+   - Configure properties in `jmeter.properties` file
+2. Ensure you have access to Amazon Bedrock in your AWS region
+3. Request access to Claude models in the AWS Bedrock console if needed
+4. Configure the `aws.bedrock.region` property to your preferred AWS region
+5. For more information about AWS Bedrock, visit the [AWS Bedrock documentation](https://docs.aws.amazon.com/bedrock/)
 
 ### OpenAI API
 
@@ -236,7 +242,7 @@ Feather Wand supports both Anthropic (Claude) and OpenAI APIs. You can configure
 
 Feather Wand automatically filters available models to show only chat-compatible models. By default, it excludes audio, TTS, transcription, and other non-chat models. You can select your preferred model from the dropdown in the UI, or set default models in the properties file:
 
-- For Claude: `claude.default.model` (e.g., `claude-3-7-sonnet-20250219`)
+- For Claude via Bedrock: `claude.default.model` (e.g., `anthropic.claude-3-sonnet-20240229-v1:0`)
 - For OpenAI: `openai.default.model` (e.g., `gpt-4o`)
 
 ### Model Filtering
@@ -244,7 +250,7 @@ Feather Wand automatically filters available models to show only chat-compatible
 Feather Wand applies intelligent filtering to the available models to ensure you only see relevant chat models in the dropdown:
 
 - **OpenAI Models**: Filters out audio, TTS, whisper, davinci, search, transcribe, realtime, and instruct models to show only GPT chat models.
-- **Claude Models**: Shows only the latest available Claude models.
+- **Claude Models via Bedrock**: Shows only Claude models available through AWS Bedrock.
 
 This filtering ensures that you only see models that are compatible with the chat interface and appropriate for JMeter-related tasks.
 
@@ -265,6 +271,6 @@ While the Feather Wand plugin aims to provide helpful assistance, please keep th
 - **Test Verification**: After making changes based on AI recommendations, thoroughly verify your test plan functionality in a controlled environment before running it against production systems.
 - **Performance Impact**: Some AI-suggested configurations may impact test performance. Monitor resource usage when implementing new configurations.
 - **Security Considerations**: Do not share sensitive information (credentials, proprietary code, etc.) in your conversations with the AI.
-- **API Costs**: Be aware that using the Claude API or OpenAI API incurs costs based on token usage. The plugin is designed to minimize token usage, but excessive use may result in higher costs.
+- **API Costs**: Be aware that using AWS Bedrock or OpenAI API incurs costs based on token usage. The plugin is designed to minimize token usage, but excessive use may result in higher costs.
 
 This plugin is provided as a tool to assist JMeter users, but the ultimate responsibility for test plan design, implementation, and execution remains with the user.
