@@ -12,6 +12,7 @@ import software.amazon.awssdk.services.bedrock.BedrockClient;
 import software.amazon.awssdk.core.SdkBytes;
 
 import org.qainsights.jmeter.ai.utils.AiConfig;
+import org.qainsights.jmeter.ai.utils.BedrockModelMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.qainsights.jmeter.ai.usage.BedrockUsage;
@@ -138,8 +139,13 @@ public class BedrockClaudeService implements AiService {
                 .credentialsProvider(DefaultCredentialsProvider.create())
                 .build();
 
-        // Get default model from properties
-        this.currentModelId = AiConfig.getProperty("claude.default.model", "anthropic.claude-3-sonnet-20240229-v1:0");
+        // Initialize the model mapper with available models
+        BedrockModelMapper.initialize(this.client);
+        
+        // Get default model from properties or use default
+        String configuredModel = AiConfig.getProperty("claude.default.model", "anthropic.claude-3-sonnet-20240229-v1:0");
+        this.currentModelId = BedrockModelMapper.getDefaultModelId(configuredModel);
+        log.info("Initialized with model: {}", this.currentModelId);
         this.temperature = Float.parseFloat(AiConfig.getProperty("claude.temperature", "0.5"));
         this.maxTokens = Long.parseLong(AiConfig.getProperty("claude.max.tokens", "1024"));
 
@@ -221,8 +227,15 @@ public class BedrockClaudeService implements AiService {
 
             // Ensure a model is set
             if (currentModelId == null || currentModelId.isEmpty()) {
-                currentModelId = "anthropic.claude-3-sonnet-20240229-v1:0";
+                String configuredModel = AiConfig.getProperty("claude.default.model", "anthropic.claude-3-sonnet-20240229-v1:0");
+                currentModelId = BedrockModelMapper.getDefaultModelId(configuredModel);
                 log.warn("No model was set, defaulting to: {}", currentModelId);
+            }
+            
+            // Convert display name to actual model ID if needed
+            String actualModelId = BedrockModelMapper.getModelId(currentModelId);
+            if (!actualModelId.equals(currentModelId)) {
+                log.info("Mapped display name '{}' to model ID '{}'", currentModelId, actualModelId);
             }
 
             // Ensure a temperature is set
@@ -250,6 +263,7 @@ public class BedrockClaudeService implements AiService {
 
             // Build the request payload for Claude via Bedrock
             ObjectNode requestBody = objectMapper.createObjectNode();
+            requestBody.put("anthropic_version", "bedrock-2023-05-31");
             requestBody.put("max_tokens", maxTokens);
             requestBody.put("temperature", temperature);
             
@@ -278,11 +292,13 @@ public class BedrockClaudeService implements AiService {
             String requestBodyJson = objectMapper.writeValueAsString(requestBody);
             log.info("Request body: {}", requestBodyJson);
 
-            // Invoke the model
+            // Invoke the model using the actual model ID
             InvokeModelRequest request = InvokeModelRequest.builder()
-                    .modelId(currentModelId)
+                    .modelId(actualModelId)
                     .body(SdkBytes.fromUtf8String(requestBodyJson))
                     .build();
+                    
+            log.info("Invoking model with ID: {}", actualModelId);
 
             InvokeModelResponse response = runtimeClient.invokeModel(request);
             String responseBody = response.body().asUtf8String();
@@ -290,7 +306,24 @@ public class BedrockClaudeService implements AiService {
 
             // Parse the response
             JsonNode responseJson = objectMapper.readTree(responseBody);
-            String responseText = responseJson.get("content").get(0).get("text").asText();
+            
+            // Safely extract response text with null checks
+            String responseText = "";
+            JsonNode contentNode = responseJson.get("content");
+            if (contentNode != null && contentNode.isArray() && contentNode.size() > 0) {
+                JsonNode firstContent = contentNode.get(0);
+                if (firstContent != null) {
+                    JsonNode textNode = firstContent.get("text");
+                    if (textNode != null) {
+                        responseText = textNode.asText();
+                    }
+                }
+            }
+            
+            if (responseText.isEmpty()) {
+                log.warn("No text content found in response: {}", responseBody);
+                return "Kindly provide more context for better answers.";
+            }
 
             // Record usage
             try {

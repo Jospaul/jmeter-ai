@@ -9,6 +9,7 @@ import software.amazon.awssdk.services.bedrock.model.ListFoundationModelsRespons
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.qainsights.jmeter.ai.utils.BedrockModelMapper;
 
 import com.anthropic.client.AnthropicClient;
 import com.anthropic.client.okhttp.AnthropicOkHttpClient;
@@ -94,19 +95,20 @@ public class Models {
     }
     
     /**
-     * Get Bedrock model IDs as a List of Strings
+     * Get Bedrock model display names as a List of Strings
      * @param client Bedrock client
-     * @return List of model IDs
+     * @return List of model display names
      */
     public static List<String> getBedrockModelIds(BedrockClient client) {
-        ListFoundationModelsResponse models = getBedrockModels(client);
-        if (models != null && models.modelSummaries() != null) {
-            return models.modelSummaries().stream()
-                    .filter(model -> model.modelId().contains("claude"))
-                    .map(FoundationModelSummary::modelId)
-                    .collect(Collectors.toList());
+        // Initialize the model mapper if not already done
+        if (client != null) {
+            BedrockModelMapper.initialize(client);
         }
-        return new ArrayList<>();
+        
+        // Get display names from the initialized mapper
+        List<String> displayNames = BedrockModelMapper.getDisplayNamesList();
+        log.info("Retrieved {} Bedrock model display names", displayNames.size());
+        return displayNames;
     }
 
     /**
