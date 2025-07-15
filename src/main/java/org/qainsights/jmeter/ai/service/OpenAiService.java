@@ -23,6 +23,15 @@ public class OpenAiService implements AiService {
     private float temperature;
     private String systemPrompt;
     private long maxTokens;
+    
+    /**
+     * Validates if OpenAI API configuration is valid
+     * @return true if OpenAI API key is configured and not empty
+     */
+    private static boolean isOpenAiConfigValid() {
+        String apiKey = AiConfig.getProperty("openai.api.key", "");
+        return apiKey != null && !apiKey.trim().isEmpty() && !"YOUR_API_KEY".equals(apiKey.trim());
+    }
     // Default system prompt to focus responses on JMeter
     private static final String DEFAULT_JMETER_SYSTEM_PROMPT = "You are a JMeter expert assistant embedded in a JMeter plugin called 'Feather Wand - JMeter Agent'. "
             +
@@ -102,21 +111,27 @@ public class OpenAiService implements AiService {
             "Version: JMeter 5.6+ (Also support questions about older versions from 3.0+)";
 
     public OpenAiService() {
-        String API_KEY = AiConfig.getProperty("openai.api.key", "");
-        String loggingLevel = AiConfig.getProperty("openai.log.level", "");
-        if (!loggingLevel.isEmpty()) {
-            // Set the environment variable for the OpenAI client logging
-            System.setProperty("OPENAI_LOG", loggingLevel);
-            log.info("Enabled OpenAI client logging with level: {}", loggingLevel);
-        }
-        this.client = new OpenAIOkHttpClient.Builder().apiKey(API_KEY).build();
+        // Check if OpenAI configuration is valid before initializing client
+        if (!isOpenAiConfigValid()) {
+            log.info("OpenAI configuration is not valid, skipping client initialization");
+            this.client = null;
+        } else {
+            String API_KEY = AiConfig.getProperty("openai.api.key", "");
+            String loggingLevel = AiConfig.getProperty("openai.log.level", "");
+            if (!loggingLevel.isEmpty()) {
+                // Set the environment variable for the OpenAI client logging
+                System.setProperty("OPENAI_LOG", loggingLevel);
+                log.info("Enabled OpenAI client logging with level: {}", loggingLevel);
+            }
+            this.client = new OpenAIOkHttpClient.Builder().apiKey(API_KEY).build();
 
-        // Set the client in the OpenAiUsage singleton for token usage tracking
-        try {
-            OpenAiUsage.getInstance().setClient(this.client);
-            log.info("Set OpenAI client in OpenAiUsage during initialization");
-        } catch (Exception e) {
-            log.error("Failed to set OpenAI client in OpenAiUsage", e);
+            // Set the client in the OpenAiUsage singleton for token usage tracking
+            try {
+                OpenAiUsage.getInstance().setClient(this.client);
+                log.info("Set OpenAI client in OpenAiUsage during initialization");
+            } catch (Exception e) {
+                log.error("Failed to set OpenAI client in OpenAiUsage", e);
+            }
         }
 
         this.maxHistorySize = Integer.parseInt(AiConfig.getProperty("openai.max.history.size", "10"));
@@ -146,6 +161,9 @@ public class OpenAiService implements AiService {
     }
 
     public OpenAIClient getClient() {
+        if (client == null) {
+            log.warn("OpenAI client is not initialized due to invalid configuration");
+        }
         return client;
     }
 
@@ -196,6 +214,10 @@ public class OpenAiService implements AiService {
     }
 
     public String generateResponse(List<String> conversation) {
+        if (client == null) {
+            return "Error: OpenAI configuration is not valid. Please check your API key and configuration.";
+        }
+        
         try {
             log.info("Generating response for conversation with {} messages", conversation.size());
 

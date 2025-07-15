@@ -26,6 +26,34 @@ import java.util.stream.Collectors;
 
 public class Models {
     private static final Logger log = LoggerFactory.getLogger(Models.class);
+    
+    /**
+     * Validates if OpenAI API configuration is valid
+     * @return true if OpenAI API key is configured and not empty
+     */
+    private static boolean isOpenAiConfigValid() {
+        String apiKey = AiConfig.getProperty("openai.api.key", "");
+        return apiKey != null && !apiKey.trim().isEmpty() && !"YOUR_OPENAI_API_KEY".equals(apiKey.trim());
+    }
+    
+    /**
+     * Validates if AWS Bedrock configuration is valid
+     * @return true if AWS credentials are configured
+     */
+    private static boolean isBedrockConfigValid() {
+        String accessKey = AiConfig.getProperty("aws.access.key.id", "");
+        String secretKey = AiConfig.getProperty("aws.secret.access.key", "");
+        
+        // Check if explicit credentials are provided
+        boolean hasExplicitCredentials = (accessKey != null && !accessKey.trim().isEmpty()) &&
+                                       (secretKey != null && !secretKey.trim().isEmpty());
+        
+        // If no explicit credentials, assume IAM roles or environment variables are used
+        // This is a basic check - in production, you might want more sophisticated validation
+        return hasExplicitCredentials || 
+               System.getenv("AWS_ACCESS_KEY_ID") != null || 
+               System.getProperty("aws.accessKeyId") != null;
+    }
 
     /**
      * Get a combined list of model IDs from both Bedrock, Anthropic and OpenAI
@@ -69,6 +97,11 @@ public class Models {
      * @return ListFoundationModelsResponse containing Bedrock models
      */
     public static ListFoundationModelsResponse getBedrockModels(BedrockClient client) {
+        if (!isBedrockConfigValid()) {
+            log.info("Bedrock configuration is not valid, skipping model fetch");
+            return null;
+        }
+        
         try {
             log.info("Fetching available models from AWS Bedrock");
             String region = AiConfig.getProperty("aws.bedrock.region", "us-east-1");
@@ -100,6 +133,11 @@ public class Models {
      * @return List of model display names
      */
     public static List<String> getBedrockModelIds(BedrockClient client) {
+        if (!isBedrockConfigValid()) {
+            log.info("Bedrock configuration is not valid, skipping model fetch");
+            return new ArrayList<>();
+        }
+        
         // Initialize the model mapper if not already done
         if (client != null) {
             BedrockModelMapper.initialize(client);
@@ -158,6 +196,11 @@ public class Models {
      * @return OpenAI ModelListPage
      */
     public static com.openai.models.ModelListPage getOpenAiModels(OpenAIClient client) {
+        if (!isOpenAiConfigValid()) {
+            log.info("OpenAI configuration is not valid, skipping model fetch");
+            return null;
+        }
+        
         try {
             log.info("Fetching available models from OpenAI API");
             client = OpenAIOkHttpClient.builder()
@@ -183,6 +226,11 @@ public class Models {
      * @return List of model IDs
      */
     public static List<String> getOpenAiModelIds(OpenAIClient client) {
+        if (!isOpenAiConfigValid()) {
+            log.info("OpenAI configuration is not valid, skipping model fetch");
+            return new ArrayList<>();
+        }
+        
         com.openai.models.ModelListPage models = getOpenAiModels(client);
         if (models != null && models.data() != null) {
             // Return the list of GPT models only, excluding audio and TTS models

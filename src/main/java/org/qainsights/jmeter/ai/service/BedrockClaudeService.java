@@ -36,6 +36,24 @@ public class BedrockClaudeService implements AiService {
     private boolean systemPromptInitialized = false;
     private long maxTokens;
     private final ObjectMapper objectMapper;
+    
+    /**
+     * Validates if AWS Bedrock configuration is valid
+     * @return true if AWS credentials are configured
+     */
+    private static boolean isBedrockConfigValid() {
+        String accessKey = AiConfig.getProperty("aws.access.key.id", "");
+        String secretKey = AiConfig.getProperty("aws.secret.access.key", "");
+        
+        // Check if explicit credentials are provided
+        boolean hasExplicitCredentials = (accessKey != null && !accessKey.trim().isEmpty()) &&
+                                       (secretKey != null && !secretKey.trim().isEmpty());
+        
+        // If no explicit credentials, assume IAM roles or environment variables are used
+        return hasExplicitCredentials || 
+               System.getenv("AWS_ACCESS_KEY_ID") != null || 
+               System.getProperty("aws.accessKeyId") != null;
+    }
 
     // Default system prompt to focus responses on JMeter
     private static final String DEFAULT_JMETER_SYSTEM_PROMPT = "You are a JMeter expert assistant embedded in a JMeter plugin called 'Feather Wand - JMeter Agent'. "
@@ -119,35 +137,43 @@ public class BedrockClaudeService implements AiService {
         // Default history size of 10, can be configured through jmeter.properties
         this.maxHistorySize = Integer.parseInt(AiConfig.getProperty("claude.max.history.size", "10"));
         this.objectMapper = new ObjectMapper();
-
-        // Initialize the Bedrock client
-        String region = AiConfig.getProperty("aws.bedrock.region", "us-east-1");
-
-        // Check if logging should be enabled
-        String loggingLevel = AiConfig.getProperty("bedrock.log.level", "");
-        if (!loggingLevel.isEmpty()) {
-            log.info("Enabled Bedrock client logging with level: {}", loggingLevel);
-        }
-
-        this.runtimeClient = BedrockRuntimeClient.builder()
-                .region(Region.of(region))
-                .credentialsProvider(DefaultCredentialsProvider.create())
-                .build();
-        
-        this.client = BedrockClient.builder()
-                .region(Region.of(region))
-                .credentialsProvider(DefaultCredentialsProvider.create())
-                .build();
-
-        // Initialize the model mapper with available models
-        BedrockModelMapper.initialize(this.client);
-        
-        // Get default model from properties or use default
-        String configuredModel = AiConfig.getProperty("claude.default.model", "anthropic.claude-3-sonnet-20240229-v1:0");
-        this.currentModelId = BedrockModelMapper.getDefaultModelId(configuredModel);
-        log.info("Initialized with model: {}", this.currentModelId);
         this.temperature = Float.parseFloat(AiConfig.getProperty("claude.temperature", "0.5"));
         this.maxTokens = Long.parseLong(AiConfig.getProperty("claude.max.tokens", "1024"));
+
+        // Check if Bedrock configuration is valid before initializing clients
+        if (!isBedrockConfigValid()) {
+            log.info("Bedrock configuration is not valid, skipping client initialization");
+            this.runtimeClient = null;
+            this.client = null;
+            this.currentModelId = "anthropic.claude-3-sonnet-20240229-v1:0";
+        } else {
+            // Initialize the Bedrock client
+            String region = AiConfig.getProperty("aws.bedrock.region", "us-east-1");
+
+            // Check if logging should be enabled
+            String loggingLevel = AiConfig.getProperty("bedrock.log.level", "");
+            if (!loggingLevel.isEmpty()) {
+                log.info("Enabled Bedrock client logging with level: {}", loggingLevel);
+            }
+
+            this.runtimeClient = BedrockRuntimeClient.builder()
+                    .region(Region.of(region))
+                    .credentialsProvider(DefaultCredentialsProvider.create())
+                    .build();
+            
+            this.client = BedrockClient.builder()
+                    .region(Region.of(region))
+                    .credentialsProvider(DefaultCredentialsProvider.create())
+                    .build();
+
+            // Initialize the model mapper with available models
+            BedrockModelMapper.initialize(this.client);
+            
+            // Get default model from properties or use default
+            String configuredModel = AiConfig.getProperty("claude.default.model", "anthropic.claude-3-sonnet-20240229-v1:0");
+            this.currentModelId = BedrockModelMapper.getDefaultModelId(configuredModel);
+            log.info("Initialized with model: {}", this.currentModelId);
+        }
 
         // Load system prompt from properties or use default
         try {
@@ -168,10 +194,16 @@ public class BedrockClaudeService implements AiService {
     }
 
     public BedrockClient getClient() {
+        if (client == null) {
+            log.warn("Bedrock client is not initialized due to invalid configuration");
+        }
         return client;
     }
     
     public BedrockRuntimeClient getRuntimeClient() {
+        if (runtimeClient == null) {
+            log.warn("Bedrock runtime client is not initialized due to invalid configuration");
+        }
         return runtimeClient;
     }
 
@@ -222,6 +254,10 @@ public class BedrockClaudeService implements AiService {
     }
 
     public String generateResponse(List<String> conversation) {
+        if (runtimeClient == null) {
+            return "Error: Bedrock configuration is not valid. Please check your AWS credentials and configuration.";
+        }
+        
         try {
             log.info("Generating response for conversation with {} messages", conversation.size());
 
