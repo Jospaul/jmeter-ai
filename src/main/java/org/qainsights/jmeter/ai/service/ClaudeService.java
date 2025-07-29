@@ -24,6 +24,15 @@ public class ClaudeService implements AiService {
     private boolean systemPromptInitialized = false;
     private long maxTokens;
 
+    /**
+     * Validates if OpenAI API configuration is valid
+     * @return true if OpenAI API key is configured and not empty
+     */
+    private static boolean isAnthropicAiConfigValid() {
+        String apiKey = AiConfig.getProperty("anthropic.api.key", "");
+        return apiKey != null && !apiKey.trim().isEmpty() && !"YOUR_API_KEY".equals(apiKey.trim());
+    }
+
     // Default system prompt to focus responses on JMeter
     private static final String DEFAULT_JMETER_SYSTEM_PROMPT = "You are a JMeter expert assistant embedded in a JMeter plugin called 'Feather Wand - JMeter Agent'. "
             +
@@ -103,29 +112,35 @@ public class ClaudeService implements AiService {
             "Version: JMeter 5.6+ (Also support questions about older versions from 3.0+)";
 
     public ClaudeService() {
+
+        // Check if OpenAI configuration is valid before initializing client
+        if (!isAnthropicAiConfigValid()) {
+            log.info("Anthropic configuration is not valid, skipping client initialization");
+            this.client = null;
+        }else{
+
+            // Initialize the client
+            String API_KEY = AiConfig.getProperty("anthropic.api.key", "YOUR_API_KEY");
+
+            // Check if logging should be enabled
+            String loggingLevel = AiConfig.getProperty("anthropic.log.level", "");
+            if (!loggingLevel.isEmpty()) {
+                // Set the environment variable for the Anthropic client logging
+                System.setProperty("ANTHROPIC_LOG", loggingLevel);
+                log.info("Enabled Anthropic client logging with level: {}", loggingLevel);
+            }
+
+            this.client = AnthropicOkHttpClient.builder()
+                    .apiKey(API_KEY)
+                    .build();
+        }
+        // Get default model from properties or use SONNET if not specified
         // Default history size of 10, can be configured through jmeter.properties
         this.maxHistorySize = Integer.parseInt(AiConfig.getProperty("claude.max.history.size", "10"));
-
-        // Initialize the client
-        String API_KEY = AiConfig.getProperty("anthropic.api.key", "YOUR_API_KEY");
-
-        // Check if logging should be enabled
-        String loggingLevel = AiConfig.getProperty("anthropic.log.level", "");
-        if (!loggingLevel.isEmpty()) {
-            // Set the environment variable for the Anthropic client logging
-            System.setProperty("ANTHROPIC_LOG", loggingLevel);
-            log.info("Enabled Anthropic client logging with level: {}", loggingLevel);
-        }
-
-        this.client = AnthropicOkHttpClient.builder()
-                .apiKey(API_KEY)
-                .build();
-
-        // Get default model from properties or use SONNET if not specified
         this.currentModelId = AiConfig.getProperty("claude.default.model", "claude-3-sonnet-20240229");
         this.temperature = Float.parseFloat(AiConfig.getProperty("claude.temperature", "0.5"));
         this.maxTokens = Long.parseLong(AiConfig.getProperty("claude.max.tokens", "1024"));
-
+        
         // Load system prompt from properties or use default
         try {
             systemPrompt = AiConfig.getProperty("claude.system.prompt", DEFAULT_JMETER_SYSTEM_PROMPT);
@@ -144,9 +159,13 @@ public class ClaudeService implements AiService {
             log.error("Error loading system prompt, using default", e);
             systemPrompt = DEFAULT_JMETER_SYSTEM_PROMPT;
         }
+        
     }
 
     public AnthropicClient getClient() {
+        if (client == null) {
+            log.warn("Anthropic client is not initialized due to invalid configuration");
+        }
         return client;
     }
 
@@ -197,6 +216,9 @@ public class ClaudeService implements AiService {
     }
 
     public String generateResponse(List<String> conversation) {
+        if (client == null) {
+            return "Error: Anthropic configuration is not valid. Please check your API key and configuration.";
+        }
         try {
             log.info("Generating response for conversation with {} messages", conversation.size());
 
