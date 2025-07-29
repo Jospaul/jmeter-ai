@@ -23,6 +23,7 @@ import org.apache.jmeter.testelement.TestElement;
 import org.apache.jmeter.testelement.property.JMeterProperty;
 import org.apache.jmeter.testelement.property.PropertyIterator;
 import org.qainsights.jmeter.ai.service.BedrockService;
+import org.qainsights.jmeter.ai.service.ClaudeService;
 import org.qainsights.jmeter.ai.usage.UsageCommandHandler;
 import org.qainsights.jmeter.ai.utils.AiConfig;
 import org.qainsights.jmeter.ai.utils.JMeterElementManager;
@@ -57,6 +58,7 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
     private JButton sendButton;
     private JComboBox<String> modelSelector;
     private List<String> conversationHistory;
+    private ClaudeService claudeService;
     private BedrockService bedrockService;
     private OpenAiService openAiService;
     private TreeNavigationButtons treeNavigationButtons;
@@ -405,6 +407,24 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
             @Override
             protected List<String> doInBackground() {
                 List<String> allModels = new ArrayList<>();
+
+                // Get Anthropic models
+                if(claudeService.getClient() != null){
+                try {
+                    ModelListPage anthropicModels = Models.getAnthropicModels(claudeService.getClient());
+                    if (anthropicModels != null && anthropicModels.data() != null) {
+                        for (ModelInfo model : anthropicModels.data()) {
+                            allModels.add(model.id());
+                            log.debug("Added Anthropic model: {}", model.id());
+                        }
+                        log.info("Added {} Anthropic models", anthropicModels.data().size());
+                    }
+                } catch (Exception e) {
+                    log.error("Error loading Anthropic models: {}", e.getMessage(), e);
+                }
+            }else {
+                    log.info("Skipping Anthropic claude models - Anthropic api key not configured");
+                }
 
                 // Load Bedrock models only if AWS credentials are configured
                 if (bedrockService.getClient() != null) {
