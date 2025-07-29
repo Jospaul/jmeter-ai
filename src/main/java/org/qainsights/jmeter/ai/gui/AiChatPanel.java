@@ -22,8 +22,9 @@ import org.apache.jmeter.gui.tree.JMeterTreeNode;
 import org.apache.jmeter.testelement.TestElement;
 import org.apache.jmeter.testelement.property.JMeterProperty;
 import org.apache.jmeter.testelement.property.PropertyIterator;
-import org.qainsights.jmeter.ai.service.BedrockClaudeService;
+import org.qainsights.jmeter.ai.service.BedrockService;
 import org.qainsights.jmeter.ai.usage.UsageCommandHandler;
+import org.qainsights.jmeter.ai.utils.AiConfig;
 import org.qainsights.jmeter.ai.utils.JMeterElementManager;
 import org.qainsights.jmeter.ai.utils.JMeterElementRequestHandler;
 import org.qainsights.jmeter.ai.utils.Models;
@@ -56,7 +57,7 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
     private JButton sendButton;
     private JComboBox<String> modelSelector;
     private List<String> conversationHistory;
-    private BedrockClaudeService bedrockClaudeService;
+    private BedrockService bedrockService;
     private OpenAiService openAiService;
     private TreeNavigationButtons treeNavigationButtons;
     private JPanel navigationPanel; // Added field for navigation panel
@@ -83,7 +84,7 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
      */
     public AiChatPanel() {
         // Initialize services and utilities
-        bedrockClaudeService = new BedrockClaudeService();
+        bedrockService = new BedrockService();
         openAiService = new OpenAiService();
         messageProcessor = new MessageProcessor();
 
@@ -127,7 +128,7 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
             if (selectedModel != null) {
                 log.info("Model selected from dropdown: {}", selectedModel);
                 // Immediately set the model in the service
-                bedrockClaudeService.setModel(selectedModel);
+                bedrockService.setModel(selectedModel);
                 openAiService.setModel(selectedModel);
             }
         });
@@ -403,51 +404,55 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
         new SwingWorker<List<String>, Void>() {
             @Override
             protected List<String> doInBackground() {
-                // Get models from both services
                 List<String> allModels = new ArrayList<>();
 
-                // Get Bedrock models
-                try {
-                    ListFoundationModelsResponse bedrockModels = Models.getBedrockModels(bedrockClaudeService.getClient());
-                    if (bedrockModels != null && bedrockModels.modelSummaries() != null) {
-                        for (FoundationModelSummary model : bedrockModels.modelSummaries()) {
-                            if (model.modelId().contains("claude")) {
+                // Load Bedrock models only if AWS credentials are configured
+                if (bedrockService.getClient() != null) {
+                    try {
+                        ListFoundationModelsResponse bedrockModels = Models.getBedrockModels(bedrockService.getClient());
+                        if (bedrockModels != null && bedrockModels.modelSummaries() != null) {
+                            for (FoundationModelSummary model : bedrockModels.modelSummaries()) {
                                 allModels.add(model.modelId());
                                 log.debug("Added Bedrock model: {}", model.modelId());
                             }
+                            log.info("Added {} Bedrock models", bedrockModels.modelSummaries().size());
                         }
-                        log.info("Added {} Bedrock models", bedrockModels.modelSummaries().size());
+                    } catch (Exception e) {
+                        log.error("Error loading Bedrock models: {}", e.getMessage(), e);
                     }
-                } catch (Exception e) {
-                    log.error("Error loading Bedrock models: {}", e.getMessage(), e);
+                } else {
+                    log.info("Skipping Bedrock models - AWS credentials not configured");
                 }
 
-                // Add OpenAI models
-                try {
-                    com.openai.models.ModelListPage openAiModels = Models.getOpenAiModels(openAiService.getClient());
-                    if (openAiModels != null && openAiModels.data() != null) {
-                        // Convert OpenAI models to string IDs
-                        for (Model openAiModel : openAiModels.data()) {
-                            // Only include GPT models and filter out specific model types
-                            if (openAiModel.id().startsWith("gpt") &&
-                                    !openAiModel.id().contains("audio") &&
-                                    !openAiModel.id().contains("tts") &&
-                                    !openAiModel.id().contains("whisper") &&
-                                    !openAiModel.id().contains("davinci") &&
-                                    !openAiModel.id().contains("search") &&
-                                    !openAiModel.id().contains("transcribe") &&
-                                    !openAiModel.id().contains("realtime") &&
-                                    !openAiModel.id().contains("instruct")) {
+                // Load OpenAI models only if API key is configured
+                if (openAiService.getClient() != null) {
+                    try {
+                        com.openai.models.ModelListPage openAiModels = Models.getOpenAiModels(openAiService.getClient());
+                        if (openAiModels != null && openAiModels.data() != null) {
+                            for (Model openAiModel : openAiModels.data()) {
+                                // Only include GPT models and filter out specific model types
+                                if (openAiModel.id().startsWith("gpt") &&
+                                        !openAiModel.id().contains("audio") &&
+                                        !openAiModel.id().contains("tts") &&
+                                        !openAiModel.id().contains("whisper") &&
+                                        !openAiModel.id().contains("davinci") &&
+                                        !openAiModel.id().contains("search") &&
+                                        !openAiModel.id().contains("transcribe") &&
+                                        !openAiModel.id().contains("realtime") &&
+                                        !openAiModel.id().contains("instruct")) {
 
-                                String modelId = "openai:" + openAiModel.id();
-                                allModels.add(modelId);
-                                log.debug("Added OpenAI model to selector: {}", openAiModel.id());
+                                    String modelId = "openai:" + openAiModel.id();
+                                    allModels.add(modelId);
+                                    log.debug("Added OpenAI model to selector: {}", openAiModel.id());
+                                }
                             }
+                            log.info("Added OpenAI models to selector");
                         }
-                        log.info("Added OpenAI models to selector");
+                    } catch (Exception e) {
+                        log.error("Error adding OpenAI models: {}", e.getMessage(), e);
                     }
-                } catch (Exception e) {
-                    log.error("Error adding OpenAI models: {}", e.getMessage(), e);
+                } else {
+                    log.info("Skipping OpenAI models - API key not configured");
                 }
 
                 return allModels;
@@ -459,12 +464,22 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
                     List<String> models = get();
                     modelSelector.removeAllItems();
 
-                    // Get the default model ID
-                    String defaultModelId = bedrockClaudeService.getCurrentModel();
+                    if (models.isEmpty()) {
+                        log.warn("No models available - check your API configurations");
+                        return;
+                    }
+
+                    // Determine default model based on available services
+                    String defaultModelId = null;
+                    if (bedrockService.getClient() != null) {
+                        defaultModelId = bedrockService.getCurrentModel();
+                    } else if (openAiService.getClient() != null) {
+                        defaultModelId = "openai:" + openAiService.getCurrentModel();
+                    }
+                    
                     log.info("Default model ID: {}", defaultModelId);
 
                     String defaultModel = null;
-
                     for (String model : models) {
                         modelSelector.addItem(model);
                         if (model.equals(defaultModelId)) {
@@ -480,7 +495,13 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
                         // If default model not found, select the first one
                         modelSelector.setSelectedIndex(0);
                         String selectedModel = (String) modelSelector.getSelectedItem();
-                        bedrockClaudeService.setModel(selectedModel);
+                        
+                        // Update the appropriate service with the selected model
+                        if (selectedModel.startsWith("openai:")) {
+                            openAiService.setModel(selectedModel.substring(7)); // Remove "openai:" prefix
+                        } else {
+                            bedrockService.setModel(selectedModel);
+                        }
                         log.info("Default model not found, selected first available: {}", selectedModel);
                     }
                 } catch (Exception e) {
@@ -770,9 +791,9 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
                     serviceToUse = openAiService;
                     log.info("Using OpenAI service for optimization");
                 } else {
-                    // Use Bedrock Claude service
-                    serviceToUse = bedrockClaudeService;
-                    log.info("Using Bedrock Claude service for optimization");
+                    // Use Bedrock service
+                    serviceToUse = bedrockService;
+                    log.info("Using Bedrock service for optimization");
                 }
 
                 return OptimizeRequestHandler.analyzeAndOptimizeSelectedElement(serviceToUse);
@@ -1058,7 +1079,7 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
             serviceToUse = openAiService;
         }
         if (selectedModel != null && selectedModel.contains("claude")) {
-            serviceToUse = bedrockClaudeService;
+            serviceToUse = bedrockService;
         }
         AiService finalServiceToUse = serviceToUse;
         new SwingWorker<String, Void>() {
@@ -1200,7 +1221,7 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
                 if (selectedModel.startsWith("openai:")) {
                     serviceToUse = openAiService;
                 } else {
-                    serviceToUse = bedrockClaudeService;
+                    serviceToUse = bedrockService;
                 }
 
                 // Use the LintCommandHandler to process the lint command
@@ -1261,8 +1282,24 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
         String selectedModel = (String) modelSelector.getSelectedItem();
         if (selectedModel == null) {
             log.warn("No model selected in dropdown, using default Bedrock model: {}",
-                    bedrockClaudeService.getCurrentModel());
-            return bedrockClaudeService.generateResponse(new ArrayList<>(conversationHistory));
+                    bedrockService.getCurrentModel());
+            
+            // Check if Bedrock client is initialized
+            if (bedrockService.getClient() == null) {
+                log.warn("Bedrock client is not initialized. Checking for fallback options.");
+                
+                // Check if OpenAI is configured
+                String openAiKey = AiConfig.getProperty("openai.api.key", "");
+                if (openAiKey != null && !openAiKey.isEmpty() && !openAiKey.equals("YOUR_OPENAI_API_KEY")) {
+                    log.info("Using OpenAI as fallback");
+                    return openAiService.generateResponse(new ArrayList<>(conversationHistory));
+                } else {
+                    return "Error: No models could be retrieved. AWS Bedrock connection failed and no OpenAI API key is configured.\n\n" +
+                           "Please check your AWS credentials in jmeter.properties file and ensure you have access to AWS Bedrock service.";
+                }
+            }
+            
+            return bedrockService.generateResponse(new ArrayList<>(conversationHistory));
         }
 
         // Get the model ID
@@ -1280,14 +1317,14 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
             // Call OpenAI API with conversation history
             return openAiService.generateResponse(new ArrayList<>(conversationHistory));
         } else {
-            // This is a Bedrock Claude model
-            log.info("Using Bedrock Claude model: {}", selectedModel);
+            // This is a Bedrock model
+            log.info("Using Bedrock model: {}", selectedModel);
 
-            // Set the model in the Bedrock Claude service
-            bedrockClaudeService.setModel(selectedModel);
+            // Set the model in the Bedrock service
+            bedrockService.setModel(selectedModel);
 
-            // Call Bedrock Claude API with conversation history
-            return bedrockClaudeService.generateResponse(new ArrayList<>(conversationHistory));
+            // Call Bedrock API with conversation history
+            return bedrockService.generateResponse(new ArrayList<>(conversationHistory));
         }
     }
 
@@ -1310,7 +1347,7 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
                 if (selectedModel.startsWith("openai:")) {
                     serviceToUse = openAiService;
                 } else {
-                    serviceToUse = bedrockClaudeService;
+                    serviceToUse = bedrockService;
                 }
 
                 // Create a LintCommandHandler and process the undo
@@ -1353,7 +1390,7 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
             @Override
             protected String doInBackground() throws Exception {
                 // Create a LintCommandHandler and process the redo
-                LintCommandHandler lintHandler = new LintCommandHandler(bedrockClaudeService);
+                LintCommandHandler lintHandler = new LintCommandHandler(bedrockService);
                 return lintHandler.redoLastUndo();
             }
 

@@ -1,6 +1,5 @@
 package org.qainsights.jmeter.ai.utils;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,9 +34,8 @@ public class BedrockModelMapper {
         try {
             log.info("Fetching available models and inference profiles from AWS Bedrock");
             
-            // First, get foundation models
+            // First, get foundation models (all providers)
             ListFoundationModelsRequest foundationRequest = ListFoundationModelsRequest.builder()
-                    .byProvider("anthropic")
                     .build();
             ListFoundationModelsResponse foundationModels = bedrockClient.listFoundationModels(foundationRequest);
             
@@ -55,15 +53,12 @@ public class BedrockModelMapper {
                 
                 for (InferenceProfileSummary profile : inferenceProfiles.inferenceProfileSummaries()) {
                     String profileId = profile.inferenceProfileId();
-                    // Only include Anthropic/Claude profiles
-                    if (profileId.contains("anthropic") || profileId.contains("claude")) {
-                        // Extract the base model ID from the profile for display
-                        String baseModelId = extractBaseModelId(profileId);
-                        if (baseModelId != null) {
-                            // Display the base model ID, but use the inference profile for API calls
-                            MODEL_MAPPING.put(baseModelId, profileId);
-                            log.debug("Added inference profile: {} -> {}", baseModelId, profileId);
-                        }
+                    // Include all inference profiles
+                    String baseModelId = extractBaseModelId(profileId);
+                    if (baseModelId != null) {
+                        // Display the base model ID, but use the inference profile for API calls
+                        MODEL_MAPPING.put(baseModelId, profileId);
+                        log.debug("Added inference profile: {} -> {}", baseModelId, profileId);
                     }
                 }
             } catch (Exception e) {
@@ -74,7 +69,12 @@ public class BedrockModelMapper {
             log.info("Successfully initialized {} Bedrock models", MODEL_MAPPING.size());
             
         } catch (Exception e) {
-            log.error("Failed to initialize Bedrock models, using fallback models", e);
+            String errorMessage = e.getMessage();
+            if (errorMessage != null && errorMessage.contains("security token")) {
+                log.error("AWS credentials are invalid or expired. Please check your AWS configuration: {}", errorMessage);
+            } else {
+                log.error("Failed to initialize Bedrock models, using fallback models: {}", errorMessage);
+            }
             initializeFallbackModels();
             initialized = true;
         }
@@ -86,11 +86,21 @@ public class BedrockModelMapper {
     private static void initializeFallbackModels() {
         MODEL_MAPPING.clear();
         // Use inference profiles as the API values, display base model IDs
+        // Anthropic models
         MODEL_MAPPING.put("anthropic.claude-3-5-sonnet-20241022-v2:0", "us.anthropic.claude-3-5-sonnet-20241022-v2:0");
         MODEL_MAPPING.put("anthropic.claude-3-5-sonnet-20240620-v1:0", "us.anthropic.claude-3-5-sonnet-20240620-v1:0");
         MODEL_MAPPING.put("anthropic.claude-3-opus-20240229-v1:0", "us.anthropic.claude-3-opus-20240229-v1:0");
         MODEL_MAPPING.put("anthropic.claude-3-sonnet-20240229-v1:0", "us.anthropic.claude-3-sonnet-20240229-v1:0");
         MODEL_MAPPING.put("anthropic.claude-3-haiku-20240307-v1:0", "us.anthropic.claude-3-haiku-20240307-v1:0");
+        // Amazon models
+        MODEL_MAPPING.put("amazon.nova-micro-v1:0", "us.amazon.nova-micro-v1:0");
+        MODEL_MAPPING.put("amazon.nova-lite-v1:0", "us.amazon.nova-lite-v1:0");
+        MODEL_MAPPING.put("amazon.nova-pro-v1:0", "us.amazon.nova-pro-v1:0");
+        // Meta models
+        MODEL_MAPPING.put("meta.llama3-2-1b-instruct-v1:0", "meta.llama3-2-1b-instruct-v1:0");
+        MODEL_MAPPING.put("meta.llama3-2-3b-instruct-v1:0", "meta.llama3-2-3b-instruct-v1:0");
+        MODEL_MAPPING.put("meta.llama3-2-11b-instruct-v1:0", "meta.llama3-2-11b-instruct-v1:0");
+        MODEL_MAPPING.put("meta.llama3-2-90b-instruct-v1:0", "meta.llama3-2-90b-instruct-v1:0");
         log.info("Initialized {} fallback models", MODEL_MAPPING.size());
     }
     
@@ -103,12 +113,11 @@ public class BedrockModelMapper {
     private static String extractBaseModelId(String profileId) {
         // Convert inference profile ID to base model ID
         // e.g., "us.anthropic.claude-3-5-sonnet-20241022-v2:0" -> "anthropic.claude-3-5-sonnet-20241022-v2:0"
-        if (profileId.startsWith("us.anthropic.")) {
-            return profileId.replace("us.anthropic.", "anthropic.");
-        } else if (profileId.startsWith("eu.anthropic.")) {
-            return profileId.replace("eu.anthropic.", "anthropic.");
-        } else if (profileId.startsWith("anthropic.")) {
-            return profileId;
+        // e.g., "us.amazon.nova-micro-v1:0" -> "amazon.nova-micro-v1:0"
+        if (profileId.startsWith("us.")) {
+            return profileId.substring(3); // Remove "us." prefix
+        } else if (profileId.startsWith("eu.")) {
+            return profileId.substring(3); // Remove "eu." prefix
         }
         return profileId; // Return as-is if pattern doesn't match
     }

@@ -1,7 +1,5 @@
 package org.qainsights.jmeter.ai.utils;
 
-import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
-import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.bedrock.BedrockClient;
 import software.amazon.awssdk.services.bedrock.model.FoundationModelSummary;
 import software.amazon.awssdk.services.bedrock.model.ListFoundationModelsRequest;
@@ -9,8 +7,6 @@ import software.amazon.awssdk.services.bedrock.model.ListFoundationModelsRespons
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.qainsights.jmeter.ai.utils.BedrockModelMapper;
-
 import com.anthropic.client.AnthropicClient;
 import com.anthropic.client.okhttp.AnthropicOkHttpClient;
 import com.anthropic.models.models.ModelInfo;
@@ -36,25 +32,6 @@ public class Models {
         return apiKey != null && !apiKey.trim().isEmpty() && !"YOUR_OPENAI_API_KEY".equals(apiKey.trim());
     }
     
-    /**
-     * Validates if AWS Bedrock configuration is valid
-     * @return true if AWS credentials are configured
-     */
-    private static boolean isBedrockConfigValid() {
-        String accessKey = AiConfig.getProperty("aws.access.key.id", "");
-        String secretKey = AiConfig.getProperty("aws.secret.access.key", "");
-        
-        // Check if explicit credentials are provided
-        boolean hasExplicitCredentials = (accessKey != null && !accessKey.trim().isEmpty()) &&
-                                       (secretKey != null && !secretKey.trim().isEmpty());
-        
-        // If no explicit credentials, assume IAM roles or environment variables are used
-        // This is a basic check - in production, you might want more sophisticated validation
-        return hasExplicitCredentials || 
-               System.getenv("AWS_ACCESS_KEY_ID") != null || 
-               System.getProperty("aws.accessKeyId") != null;
-    }
-
     /**
      * Get a combined list of model IDs from both Bedrock, Anthropic and OpenAI
      * @param bedrockClient Bedrock client
@@ -97,22 +74,15 @@ public class Models {
      * @return ListFoundationModelsResponse containing Bedrock models
      */
     public static ListFoundationModelsResponse getBedrockModels(BedrockClient client) {
-        if (!isBedrockConfigValid()) {
-            log.info("Bedrock configuration is not valid, skipping model fetch");
+        if (client == null) {
+            log.warn("Bedrock client is null, cannot fetch models");
             return null;
         }
         
         try {
             log.info("Fetching available models from AWS Bedrock");
-            String region = AiConfig.getProperty("aws.bedrock.region", "us-east-1");
             
-            client = BedrockClient.builder()
-                    .region(Region.of(region))
-                    .credentialsProvider(DefaultCredentialsProvider.create())
-                    .build();
-
             ListFoundationModelsRequest request = ListFoundationModelsRequest.builder()
-                    .byProvider("anthropic")
                     .build();
             ListFoundationModelsResponse models = client.listFoundationModels(request);
             
@@ -122,7 +92,7 @@ public class Models {
             }
             return models;
         } catch (Exception e) {
-            log.error("Error fetching models from AWS Bedrock: {}", e.getMessage(), e);
+            log.error("Error fetching models from AWS Bedrock: {}", e.getMessage());
             return null;
         }
     }
@@ -133,20 +103,23 @@ public class Models {
      * @return List of model display names
      */
     public static List<String> getBedrockModelIds(BedrockClient client) {
-        if (!isBedrockConfigValid()) {
-            log.info("Bedrock configuration is not valid, skipping model fetch");
+        if (client == null) {
+            log.warn("Bedrock client is null, cannot fetch model IDs");
             return new ArrayList<>();
         }
         
-        // Initialize the model mapper if not already done
-        if (client != null) {
+        try {
+            // Initialize the model mapper if not already done
             BedrockModelMapper.initialize(client);
+            
+            // Get display names from the initialized mapper
+            List<String> displayNames = BedrockModelMapper.getDisplayNamesList();
+            log.info("Retrieved {} Bedrock model display names", displayNames.size());
+            return displayNames;
+        } catch (Exception e) {
+            log.error("Error retrieving Bedrock model IDs: {}", e.getMessage());
+            return new ArrayList<>();
         }
-        
-        // Get display names from the initialized mapper
-        List<String> displayNames = BedrockModelMapper.getDisplayNamesList();
-        log.info("Retrieved {} Bedrock model display names", displayNames.size());
-        return displayNames;
     }
 
     /**
@@ -249,4 +222,6 @@ public class Models {
         }
         return new ArrayList<>();
     }
+    
+
 }

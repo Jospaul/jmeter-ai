@@ -3,7 +3,8 @@ package org.qainsights.jmeter.ai.service;
 import java.util.List;
 import java.util.ArrayList;
 
-import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import org.qainsights.jmeter.ai.utils.AwsCredentialsManager;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelRequest;
@@ -23,15 +24,15 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 
 /**
- * BedrockClaudeService class for AWS Bedrock Claude integration.
+ * BedrockService class for AWS Bedrock integration.
  */
-public class BedrockClaudeService implements AiService {
-    private static final Logger log = LoggerFactory.getLogger(BedrockClaudeService.class);
+public class BedrockService implements AiService {
+    private static final Logger log = LoggerFactory.getLogger(BedrockService.class);
     private final int maxHistorySize;
     private String currentModelId;
     private float temperature;
-    private final BedrockRuntimeClient runtimeClient;
-    private final BedrockClient client;
+    private BedrockRuntimeClient runtimeClient;
+    private BedrockClient client;
     private String systemPrompt;
     private boolean systemPromptInitialized = false;
     private long maxTokens;
@@ -42,17 +43,7 @@ public class BedrockClaudeService implements AiService {
      * @return true if AWS credentials are configured
      */
     private static boolean isBedrockConfigValid() {
-        String accessKey = AiConfig.getProperty("aws.access.key.id", "");
-        String secretKey = AiConfig.getProperty("aws.secret.access.key", "");
-        
-        // Check if explicit credentials are provided
-        boolean hasExplicitCredentials = (accessKey != null && !accessKey.trim().isEmpty()) &&
-                                       (secretKey != null && !secretKey.trim().isEmpty());
-        
-        // If no explicit credentials, assume IAM roles or environment variables are used
-        return hasExplicitCredentials || 
-               System.getenv("AWS_ACCESS_KEY_ID") != null || 
-               System.getProperty("aws.accessKeyId") != null;
+        return AwsCredentialsManager.isConfigValid();
     }
 
     // Default system prompt to focus responses on JMeter
@@ -133,22 +124,17 @@ public class BedrockClaudeService implements AiService {
             "\n" +
             "Version: JMeter 5.6+ (Also support questions about older versions from 3.0+)";
 
-    public BedrockClaudeService() {
+    public BedrockService() {
         // Default history size of 10, can be configured through jmeter.properties
-        this.maxHistorySize = Integer.parseInt(AiConfig.getProperty("claude.max.history.size", "10"));
+        this.maxHistorySize = Integer.parseInt(AiConfig.getProperty("bedrock.max.history.size", "10"));
         this.objectMapper = new ObjectMapper();
-        this.temperature = Float.parseFloat(AiConfig.getProperty("claude.temperature", "0.5"));
-        this.maxTokens = Long.parseLong(AiConfig.getProperty("claude.max.tokens", "1024"));
-
-        // Check if Bedrock configuration is valid before initializing clients
-        if (!isBedrockConfigValid()) {
-            log.info("Bedrock configuration is not valid, skipping client initialization");
-            this.runtimeClient = null;
-            this.client = null;
-            this.currentModelId = "anthropic.claude-3-sonnet-20240229-v1:0";
-        } else {
+        this.temperature = Float.parseFloat(AiConfig.getProperty("bedrock.temperature", "0.5"));
+        this.maxTokens = Long.parseLong(AiConfig.getProperty("bedrock.max.tokens", "1024"));
+        
+        try {
             // Initialize the Bedrock client
             String region = AiConfig.getProperty("aws.bedrock.region", "us-east-1");
+            log.info("Initializing Bedrock client with region: {}", region);
 
             // Check if logging should be enabled
             String loggingLevel = AiConfig.getProperty("bedrock.log.level", "");
@@ -156,28 +142,36 @@ public class BedrockClaudeService implements AiService {
                 log.info("Enabled Bedrock client logging with level: {}", loggingLevel);
             }
 
+            AwsCredentialsProvider credentialsProvider = AwsCredentialsManager.createCredentialsProvider();
+            
             this.runtimeClient = BedrockRuntimeClient.builder()
                     .region(Region.of(region))
-                    .credentialsProvider(DefaultCredentialsProvider.create())
+                    .credentialsProvider(credentialsProvider)
                     .build();
             
             this.client = BedrockClient.builder()
                     .region(Region.of(region))
-                    .credentialsProvider(DefaultCredentialsProvider.create())
+                    .credentialsProvider(credentialsProvider)
                     .build();
 
             // Initialize the model mapper with available models
             BedrockModelMapper.initialize(this.client);
             
             // Get default model from properties or use default
-            String configuredModel = AiConfig.getProperty("claude.default.model", "anthropic.claude-3-sonnet-20240229-v1:0");
+            String configuredModel = AiConfig.getProperty("bedrock.default.model", "anthropic.claude-3-sonnet-20240229-v1:0");
             this.currentModelId = BedrockModelMapper.getDefaultModelId(configuredModel);
             log.info("Initialized with model: {}", this.currentModelId);
+        } catch (Exception e) {
+            log.error("Failed to initialize Bedrock client: {}", e.getMessage());
+            log.warn("Bedrock client is not initialized due to invalid configuration");
+            this.runtimeClient = null;
+            this.client = null;
+            this.currentModelId = "anthropic.claude-3-sonnet-20240229-v1:0";
         }
 
         // Load system prompt from properties or use default
         try {
-            systemPrompt = AiConfig.getProperty("claude.system.prompt", DEFAULT_JMETER_SYSTEM_PROMPT);
+            systemPrompt = AiConfig.getProperty("bedrock.system.prompt", DEFAULT_JMETER_SYSTEM_PROMPT);
 
             if (systemPrompt == null) {
                 log.warn("System prompt is null, using default");
@@ -249,7 +243,7 @@ public class BedrockClaudeService implements AiService {
     }
 
     public String sendMessage(String message) {
-        log.info("Sending message to Claude via Bedrock: {}", message);
+        log.info("Sending message to Bedrock: {}", message);
         return generateResponse(java.util.Collections.singletonList(message));
     }
 
@@ -263,7 +257,7 @@ public class BedrockClaudeService implements AiService {
 
             // Ensure a model is set
             if (currentModelId == null || currentModelId.isEmpty()) {
-                String configuredModel = AiConfig.getProperty("claude.default.model", "anthropic.claude-3-sonnet-20240229-v1:0");
+                String configuredModel = AiConfig.getProperty("bedrock.default.model", "anthropic.claude-3-sonnet-20240229-v1:0");
                 currentModelId = BedrockModelMapper.getDefaultModelId(configuredModel);
                 log.warn("No model was set, defaulting to: {}", currentModelId);
             }
@@ -297,7 +291,7 @@ public class BedrockClaudeService implements AiService {
                 log.info("Limiting conversation to last {} messages", limitedConversation.size());
             }
 
-            // Build the request payload for Claude via Bedrock
+            // Build the request payload for Bedrock
             ObjectNode requestBody = objectMapper.createObjectNode();
             requestBody.put("anthropic_version", "bedrock-2023-05-31");
             requestBody.put("max_tokens", maxTokens);
@@ -440,7 +434,9 @@ public class BedrockClaudeService implements AiService {
         }
     }
 
+
+
     public String getName() {
-        return "AWS Bedrock Claude";
+        return "AWS Bedrock";
     }
 }
