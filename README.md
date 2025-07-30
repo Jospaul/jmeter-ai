@@ -48,19 +48,48 @@ The Feather Wand plugin can be configured through JMeter properties. Copy the `j
 
 ### 🔧 Available Configuration Options
 
-#### AWS Bedrock (Claude) Configuration
+#### General Configuration
+
+| Property                         | Description                                                    | Default Value |
+| -------------------------------- | -------------------------------------------------------------- | ------------- |
+| `jmeter.ai.refactoring.enabled`  | Enable AI refactoring for JSR223 script editor                | true          |
+
+#### AWS Bedrock Configuration
 
 | Property                  | Description                                                  | Default Value                                |
 | ------------------------- | ------------------------------------------------------------ | -------------------------------------------- |
 | `aws.bedrock.region`      | AWS region where Bedrock is available                        | us-east-1                                    |
-| `aws.access.key.id`      | AWS Access Key ID (optional if using IAM roles)             | Optional                                     |
-| `aws.secret.access.key`  | AWS Secret Access Key (optional if using IAM roles)         | Optional                                     |
-| `claude.default.model`    | Default Claude model to use via Bedrock                     | anthropic.claude-3-sonnet-20240229-v1:0     |
-| `claude.temperature`      | Temperature setting (0.0-1.0)                                | 0.7                                          |
-| `claude.max.tokens`       | Maximum tokens for AI responses                              | 1024                                         |
+| `aws.access.key.id`      | AWS Access Key ID (optional if using other auth methods)     | Optional                                     |
+| `aws.secret.access.key`  | AWS Secret Access Key (optional if using other auth methods) | Optional                                     |
+| `aws.session.token`      | AWS Session Token (for temporary credentials)                | Optional                                     |
+| `aws.profile.name`       | AWS Profile Name (supports regular and SSO profiles)         | Optional                                     |
+| `bedrock.default.model`   | Default Bedrock model to use                                 | anthropic.claude-3-sonnet-20240229-v1:0     |
+| `bedrock.temperature`     | Temperature setting (0.0-1.0)                                | 0.5                                          |
+| `bedrock.max.tokens`      | Maximum tokens for AI responses                              | 1024                                         |
+| `bedrock.max.history.size`| Maximum conversation history size                            | 10                                           |
+| `bedrock.system.prompt`   | System prompt that guides Bedrock responses                  | See sample properties file                   |
+| `bedrock.log.level`       | Logging level ("info" or "debug")                            | Empty (disabled)                             |
+
+#### Legacy Claude Configuration (Direct API)
+
+| Property                  | Description                                                  | Default Value                                |
+| ------------------------- | ------------------------------------------------------------ | -------------------------------------------- |
+| `claude.default.model`    | Default Claude model via Bedrock                            | anthropic.claude-3-sonnet-20240229-v1:0     |
+| `claude.temperature`      | Temperature setting (0.0-1.0)                                | 0.5                                          |
 | `claude.max.history.size` | Maximum conversation history size                            | 10                                           |
 | `claude.system.prompt`    | System prompt that guides Claude's responses                 | See sample properties file                   |
-| `bedrock.log.level`       | Logging level for Bedrock API requests ("info" or "debug")   | Empty (disabled)                             |
+
+#### Anthropic Direct API Configuration
+
+| Property                  | Description                                                  | Default Value                                |
+| ------------------------- | ------------------------------------------------------------ | -------------------------------------------- |
+| `anthropic.api.key`       | Your Anthropic API key                                       | Required                                     |
+| `anthropic.default.model` | Default Anthropic model                                      | claude-3-sonnet-20240229                     |
+| `anthropic.temperature`   | Temperature setting (0.0-1.0)                                | 0.5                                          |
+| `anthropic.max.tokens`    | Maximum tokens for AI responses                              | 1024                                         |
+| `anthropic.max.history.size` | Maximum conversation history size                         | 10                                           |
+| `anthropic.system.prompt` | System prompt that guides Anthropic responses               | See sample properties file                   |
+| `anthropic.log.level`     | Logging level                                                | Empty (disabled)                             |
 
 #### OpenAI Configuration
 
@@ -72,14 +101,7 @@ The Feather Wand plugin can be configured through JMeter properties. Copy the `j
 | `openai.max.tokens`       | Maximum tokens for AI responses                           | 1024                       |
 | `openai.max.history.size` | Maximum conversation history size                         | 10                         |
 | `openai.system.prompt`    | System prompt that guides OpenAI's responses              | See sample properties file |
-| `openai.log.level`        | Logging level for OpenAI API requests ("INFO" or "DEBUG") | Empty (disabled)           |
-
-#### Code Refactoring Configuration
-
-| Property                  | Description                                                  | Default Value              |
-| ------------------------- | ------------------------------------------------------------ | -------------------------- |
-| `jmeter.ai.refactoring.enabled` | Enable code refactoring for JSR223 script editor            | true                       |
-| `jmeter.ai.service.type` | The AI service to use for code refactoring ("openai" or "bedrock") | "openai"                   |
+| `openai.log.level`        | Logging level                                             | Empty (disabled)           |
 
 ### 💬 Customizing the System Prompt
 
@@ -220,15 +242,39 @@ Feather Wand supports both AWS Bedrock (Claude) and OpenAI APIs. You can configu
 
 ### AWS Bedrock (Claude)
 
-1. Set up AWS credentials using one of the following methods:
-   - AWS credentials file (`~/.aws/credentials`)
-   - Environment variables (`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`)
-   - IAM roles (recommended for EC2 instances)
-   - Configure properties in `jmeter.properties` file
-2. Ensure you have access to Amazon Bedrock in your AWS region
-3. Request access to Claude models in the AWS Bedrock console if needed
-4. Configure the `aws.bedrock.region` property to your preferred AWS region
-5. For more information about AWS Bedrock, visit the [AWS Bedrock documentation](https://docs.aws.amazon.com/bedrock/)
+1. **Authentication Methods** (choose one):
+   - **Method 1**: Direct credentials (not recommended for production)
+     ```properties
+     aws.access.key.id=YOUR_ACCESS_KEY_ID
+     aws.secret.access.key=YOUR_SECRET_ACCESS_KEY
+     ```
+   - **Method 2**: AWS Profile (recommended, supports SSO)
+     ```properties
+     aws.profile.name=YOUR_PROFILE_NAME
+     ```
+   - **Method 3**: Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
+   - **Method 4**: IAM roles (for EC2 instances)
+   - **Method 5**: Default credentials provider chain
+
+2. **AWS SSO Setup** (if using SSO profiles):
+   - Ensure your profile in `~/.aws/config` is configured:
+     ```ini
+     [profile your-sso-profile]
+     sso_start_url = https://your-domain.awsapps.com/start
+     sso_region = us-east-1
+     sso_account_id = 123456789012
+     sso_role_name = YourRoleName
+     region = us-east-1
+     output = json
+     ```
+   - Run `aws sso login --profile YOUR_PROFILE_NAME` before using JMeter
+
+3. **Configuration**:
+   - Set `aws.bedrock.region` to your preferred AWS region
+   - Choose your model with `bedrock.default.model`
+   - Ensure you have access to Amazon Bedrock and Claude models in your AWS region
+
+4. For more information, visit the [AWS Bedrock documentation](https://docs.aws.amazon.com/bedrock/)
 
 ### OpenAI API
 
