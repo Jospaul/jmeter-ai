@@ -53,6 +53,9 @@ The Feather Wand plugin can be configured through JMeter properties. Copy the `j
 | Property                         | Description                                                    | Default Value |
 | -------------------------------- | -------------------------------------------------------------- | ------------- |
 | `jmeter.ai.refactoring.enabled`  | Enable AI refactoring for JSR223 script editor                | true          |
+| `aws.profile.is.sso`            | Set to true if AWS profile uses SSO, false for basic credentials | false      |
+| `aws.sso.auto.refresh`          | Enable automatic SSO token refresh when tokens expire         | true          |
+| `aws.sso.startup.check`         | Enable proactive SSO token validation on application startup  | true          |
 
 #### AWS Bedrock Configuration
 
@@ -267,7 +270,8 @@ Feather Wand supports both AWS Bedrock (Claude) and OpenAI APIs. You can configu
      region = us-east-1
      output = json
      ```
-   - Run `aws sso login --profile YOUR_PROFILE_NAME` before using JMeter
+   - **Automatic Token Refresh**: The plugin automatically detects when SSO tokens expire and prompts for refresh
+   - **Manual Setup**: If needed, run `aws sso login --profile YOUR_PROFILE_NAME` before using JMeter
 
 3. **Configuration**:
    - Set `aws.bedrock.region` to your preferred AWS region

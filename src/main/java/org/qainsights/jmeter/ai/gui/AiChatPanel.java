@@ -89,6 +89,9 @@ public class AiChatPanel extends JPanel implements PropertyChangeListener {
      * Constructs a new AiChatPanel.
      */
     public AiChatPanel() {
+        // Initialize AWS SSO token refresh on application startup
+        org.qainsights.jmeter.ai.utils.AwsStartupInitializer.initialize();
+        
         // Initialize services and utilities
         bedrockService = new BedrockService();
         claudeService = new ClaudeService();

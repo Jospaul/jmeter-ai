@@ -17,6 +17,7 @@ import org.qainsights.jmeter.ai.utils.BedrockModelMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.qainsights.jmeter.ai.usage.BedrockUsage;
+import org.qainsights.jmeter.ai.utils.AwsStartupInitializer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -37,6 +38,7 @@ public class BedrockService implements AiService {
     private boolean systemPromptInitialized = false;
     private long maxTokens;
     private final ObjectMapper objectMapper;
+    private AwsStartupInitializer awsStartupInitializer;
     
     /**
      * Validates if AWS Bedrock configuration is valid
@@ -125,6 +127,9 @@ public class BedrockService implements AiService {
             "Version: JMeter 5.6+ (Also support questions about older versions from 3.0+)";
 
     public BedrockService() {
+        // Initialize AWS credentials and check SSO token status
+        awsStartupInitializer.initialize();
+        
         // Default history size of 10, can be configured through jmeter.properties
         this.maxHistorySize = Integer.parseInt(AiConfig.getProperty("bedrock.max.history.size", "10"));
         this.objectMapper = new ObjectMapper();

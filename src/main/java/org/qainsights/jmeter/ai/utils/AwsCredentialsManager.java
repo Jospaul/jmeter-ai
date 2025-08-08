@@ -69,23 +69,18 @@ public class AwsCredentialsManager {
         if (profileName != null && !profileName.trim().isEmpty()) {
             log.info("Using AWS profile: {}", profileName);
             try {
-                // Check if this is an SSO profile
-                try {
-                    ProfileFile profileFile = ProfileFile.defaultProfileFile();
-                    Optional<Profile> profile = profileFile.profile(profileName);
-                    if (profile.isPresent()) {
-                        Profile p = profile.get();
-                        if (p.property("sso_start_url").isPresent() || 
-                            p.property("sso_session").isPresent()) {
-                            log.info("Detected SSO profile: {}", profileName);
-                        }
-                    }
-                } catch (Exception profileException) {
-                    log.debug("Could not read profile file: {}", profileException.getMessage());
+                boolean isSsoProfile = Boolean.parseBoolean(AiConfig.getProperty("aws.profile.is.sso", "false"));
+                
+                if (isSsoProfile) {
+                    log.info("Profile {} configured as SSO. Using auto-refresh credentials provider.", profileName);
+                    AwsSsoTokenManager tokenManager = AwsSsoTokenManager.getInstance();
+                    return tokenManager.createAutoRefreshCredentialsProvider(profileName);
+                } else {
+                    log.info("Profile {} configured as basic credentials. Using standard provider.", profileName);
+                    return ProfileCredentialsProvider.builder()
+                        .profileName(profileName)
+                        .build();
                 }
-                return ProfileCredentialsProvider.builder()
-                    .profileName(profileName)
-                    .build();
             } catch (Exception e) {
                 log.warn("Failed to create profile credentials provider for profile '{}': {}", profileName, e.getMessage());
                 log.info("Falling back to default credentials provider");
