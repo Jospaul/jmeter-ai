@@ -1,7 +1,6 @@
 package org.qainsights.jmeter.ai.service;
 
 import java.util.List;
-import java.util.ArrayList;
 
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import org.qainsights.jmeter.ai.utils.AwsCredentialsManager;
@@ -9,6 +8,7 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelRequest;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelResponse;
+import software.amazon.awssdk.services.bedrock.model.ListFoundationModelsRequest;
 import software.amazon.awssdk.services.bedrock.BedrockClient;
 import software.amazon.awssdk.core.SdkBytes;
 
@@ -38,7 +38,7 @@ public class BedrockService implements AiService {
     private boolean systemPromptInitialized = false;
     private long maxTokens;
     private final ObjectMapper objectMapper;
-    private AwsStartupInitializer awsStartupInitializer;
+
     
     /**
      * Validates if AWS Bedrock configuration is valid
@@ -127,8 +127,8 @@ public class BedrockService implements AiService {
             "Version: JMeter 5.6+ (Also support questions about older versions from 3.0+)";
 
     public BedrockService() {
-        // Initialize AWS credentials and check SSO token status
-        awsStartupInitializer.initialize();
+        // Initialize AWS startup initializer
+        AwsStartupInitializer.initialize();
         
         // Default history size of 10, can be configured through jmeter.properties
         this.maxHistorySize = Integer.parseInt(AiConfig.getProperty("bedrock.max.history.size", "10"));
@@ -167,7 +167,15 @@ public class BedrockService implements AiService {
             this.currentModelId = BedrockModelMapper.getDefaultModelId(configuredModel);
             log.info("Initialized with model: {}", this.currentModelId);
         } catch (Exception e) {
-            log.error("Failed to initialize Bedrock client: {}", e.getMessage());
+            String errorMessage = e.getMessage();
+            if (errorMessage != null && (errorMessage.contains("token") || 
+                                       errorMessage.contains("expired") ||
+                                       errorMessage.contains("invalid") ||
+                                       errorMessage.contains("unauthorized"))) {
+                log.warn("AWS credentials appear to be invalid/expired during initialization: {}", errorMessage);
+            } else {
+                log.error("Failed to initialize Bedrock client: {}", errorMessage);
+            }
             log.warn("Bedrock client is not initialized due to invalid configuration");
             this.runtimeClient = null;
             this.client = null;
@@ -255,6 +263,11 @@ public class BedrockService implements AiService {
     public String generateResponse(List<String> conversation) {
         if (runtimeClient == null) {
             return "Error: Bedrock configuration is not valid. Please check your AWS credentials and configuration.";
+        }
+        
+        // Validate AWS session token and refresh models if needed
+        if (!validateAndRefreshCredentials()) {
+            return "Error: AWS credentials are invalid or expired. Please check your AWS configuration.";
         }
         
         try {
@@ -421,6 +434,61 @@ public class BedrockService implements AiService {
         }
 
         return "An error occurred while communicating with AWS Bedrock. Please try again later.";
+    }
+
+    /**
+     * Validates AWS credentials and refreshes models if token is invalid
+     */
+    private boolean validateAndRefreshCredentials() {
+        try {
+            // Test credentials by making a simple API call
+            if (client != null) {
+                client.listFoundationModels(ListFoundationModelsRequest.builder().build());
+            }
+            return true;
+        } catch (Exception e) {
+            String errorMessage = e.getMessage();
+            if (errorMessage != null && (errorMessage.contains("token") || 
+                                       errorMessage.contains("expired") ||
+                                       errorMessage.contains("invalid") ||
+                                       errorMessage.contains("unauthorized"))) {
+                log.warn("AWS session token appears to be invalid/expired, attempting to refresh credentials and models");
+                return refreshCredentialsAndModels();
+            }
+            return true; // Other errors are not credential-related
+        }
+    }
+    
+    /**
+     * Refreshes AWS credentials and re-fetches available models
+     */
+    private boolean refreshCredentialsAndModels() {
+        try {
+            // Recreate credentials provider
+            String region = AiConfig.getProperty("aws.bedrock.region", "us-east-1");
+            AwsCredentialsProvider credentialsProvider = AwsCredentialsManager.createCredentialsProvider();
+            
+            // Recreate clients
+            this.runtimeClient = BedrockRuntimeClient.builder()
+                    .region(Region.of(region))
+                    .credentialsProvider(credentialsProvider)
+                    .build();
+            
+            this.client = BedrockClient.builder()
+                    .region(Region.of(region))
+                    .credentialsProvider(credentialsProvider)
+                    .build();
+            
+            // Reset and re-initialize model mapper with new client
+            BedrockModelMapper.resetInitialization();
+            BedrockModelMapper.initialize(this.client);
+            
+            log.info("Successfully refreshed AWS credentials and models");
+            return true;
+        } catch (Exception e) {
+            log.error("Failed to refresh AWS credentials and models: {}", e.getMessage());
+            return false;
+        }
     }
 
     /**

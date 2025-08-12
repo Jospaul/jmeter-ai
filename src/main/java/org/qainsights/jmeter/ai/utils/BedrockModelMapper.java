@@ -215,4 +215,13 @@ public class BedrockModelMapper {
         String displayName = getDefaultDisplayName(configuredModelId);
         return getModelId(displayName);
     }
+    
+    /**
+     * Reset initialization flag to allow re-initialization with fresh credentials
+     */
+    public static synchronized void resetInitialization() {
+        initialized = false;
+        MODEL_MAPPING.clear();
+        log.info("Reset BedrockModelMapper initialization");
+    }
 }
